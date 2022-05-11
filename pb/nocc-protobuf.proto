@@ -1,0 +1,116 @@
+
+syntax = "proto3";
+
+option go_package = "github.com/VKCOM/nocc/pb";
+
+package nocc;
+
+service CompilationService {
+    // Compilation api
+    rpc StartClient(StartClientRequest) returns (StartClientReply) {}
+    rpc StartCompilationSession(StartCompilationSessionRequest) returns (StartCompilationSessionReply) {}
+    rpc UploadFileStream(stream UploadFileChunkRequest) returns (stream UploadFileReply) {}
+    rpc RecvCompiledObjStream(OpenReceiveStreamRequest) returns (stream RecvCompiledObjChunkReply) {}
+    rpc StopClient(StopClientRequest) returns (StopClientReply) {}
+
+    // Service api
+    rpc Status(StatusRequest) returns (StatusReply) {}
+    rpc DumpLogs(DumpLogsRequest) returns (stream DumpLogsReply) {}
+    rpc DropAllCaches(DropAllCachesRequest) returns (DropAllCachesReply) {}
+}
+
+message FileMetadata {
+    string ClientFileName = 1;
+    int64 FileSize = 2;
+    fixed64 SHA256_B0_7 = 10;
+    fixed64 SHA256_B8_15 = 11;
+    fixed64 SHA256_B16_23 = 12;
+    fixed64 SHA256_B24_31 = 13;
+}
+
+message StartClientRequest {
+    string ClientID = 1;
+    string HostUserName = 2;
+    string ClientVersion = 3;
+    bool DisableObjCache = 10;
+}
+
+message StartClientReply {
+}
+
+message StartCompilationSessionRequest {
+    string ClientID = 1;
+    uint32 SessionID = 2;
+    string CppInFile = 10;
+    string CxxName = 11;
+    repeated string CxxArgs = 12;
+    repeated string CxxIDirs = 13;
+    repeated FileMetadata RequiredFiles = 14;
+}
+
+message StartCompilationSessionReply {
+    repeated uint32 FileIndexesToUpload = 1;
+}
+
+message UploadFileChunkRequest {
+    string ClientID = 1;
+    uint32 SessionID = 2;
+    uint32 FileIndex = 3;
+    bytes ChunkBody = 4;
+}
+
+message UploadFileReply {
+    // empty: when a file uploaded succeeds (in one chunk or in many successive chunks),
+    // the server sends just an empty confirmation packet
+}
+
+message OpenReceiveStreamRequest {
+    string ClientID = 1;
+}
+
+message RecvCompiledObjChunkReply {
+    uint32 SessionID = 1;
+    int32 CxxExitCode = 2;
+    bytes CxxStdout = 3;
+    bytes CxxStderr = 4;
+    int32 CxxDuration = 5;
+    int64 FileSize = 6;
+    bytes ChunkBody = 7;
+}
+
+message StopClientRequest {
+    string ClientID = 1;
+}
+
+message StopClientReply {
+}
+
+message StatusRequest {
+}
+
+message StatusReply {
+    string ServerVersion = 1;
+    repeated string ServerArgs = 2;
+    int64 ServerUptime = 3;
+    string GccVersion = 4;
+    string ClangVersion = 5;
+    int64 LogFileSize = 6;
+    int64 SrcCacheSize = 7;
+    int64 ObjCacheSize = 8;
+}
+
+message DumpLogsRequest {
+}
+
+message DumpLogsReply {
+    string LogFileExt = 1;
+    bytes ChunkBody = 2;
+}
+
+message DropAllCachesRequest {
+}
+
+message DropAllCachesReply {
+    int64 droppedSrcFiles = 1;
+    int64 droppedObjFiles = 2;
+}
