@@ -27,12 +27,12 @@ type Invocation struct {
 	sessionID  uint32    // incremental while a daemon is alive
 
 	// cmdLine is parsed to the following fields:
-	cppInFile  string       // absolute path to the input file (.cpp for compilation, .h for pch generation)
-	objOutFile string       // absolute path to the output file (.o for compilation, .gch/.pch for pch generation)
-	cxxName    string       // g++ / clang / etc.
-	cxxArgs    []string     // args like -Wall, -fpch-preprocess and many more, except:
-	cxxIDirs   IncludeDirs  // -I / -iquote / -isystem go here
-	depsFlags  DepsCmakeOut // -MD -MF file and others, used for .d files generation (not passed to server)
+	cppInFile  string      // absolute path to the input file (.cpp for compilation, .h for pch generation)
+	objOutFile string      // absolute path to the output file (.o for compilation, .gch/.pch for pch generation)
+	cxxName    string      // g++ / clang / etc.
+	cxxArgs    []string    // args like -Wall, -fpch-preprocess and many more, except:
+	cxxIDirs   IncludeDirs // -I / -iquote / -isystem go here
+	depsFlags  DepCmdFlags // -MD -MF file and others, used for .d files generation (not passed to server)
 
 	doneState int32 // see Invocation.DoneRecvObj
 	wgUpload  sync.WaitGroup
@@ -120,6 +120,7 @@ func ParseCmdLineInvocation(daemon *Daemon, cwd string, cmdLine []string) (invoc
 		if arg[0] == '-' {
 			if oFile, ok := parseArgFile("-o", arg, &i); ok {
 				invocation.objOutFile = oFile
+				invocation.depsFlags.SetCmdOutputFile(strings.TrimPrefix(arg, "-o"))
 				continue
 			} else if dir, ok := parseArgFile("-I", arg, &i); ok {
 				invocation.cxxIDirs.dirsI = append(invocation.cxxIDirs.dirsI, dir)
@@ -153,18 +154,24 @@ func ParseCmdLineInvocation(daemon *Daemon, cwd string, cmdLine []string) (invoc
 				// todo if it's placed before -include, it should remain before it after cmd line reconstruction; for now, skip
 				continue
 			} else if mfFile := parseArgStr("-MF", arg, &i); mfFile != "" {
-				invocation.depsFlags.flagMF = pathAbs(cwd, mfFile)
+				invocation.depsFlags.SetCmdFlagMF(pathAbs(cwd, mfFile))
 				continue
 			} else if strArg := parseArgStr("-MT", arg, &i); strArg != "" {
-				invocation.depsFlags.flagMT = strArg
+				invocation.depsFlags.SetCmdFlagMT(strArg)
 				continue
 			} else if strArg := parseArgStr("-MQ", arg, &i); strArg != "" {
-				invocation.depsFlags.flagMQ = strArg
+				invocation.depsFlags.SetCmdFlagMQ(strArg)
 				continue
 			} else if arg == "-MD" {
-				invocation.depsFlags.flagMD = true
+				invocation.depsFlags.SetCmdFlagMD()
 				continue
-			} else if arg == "-M" || arg == "-MM" || arg == "-MMD" || arg == "-MG" || arg == "-MP" {
+			} else if arg == "-MMD" {
+				invocation.depsFlags.SetCmdFlagMMD()
+				continue
+			} else if arg == "-MP" {
+				invocation.depsFlags.SetCmdFlagMP()
+				continue
+			} else if arg == "-M" || arg == "-MM" || arg == "-MG" {
 				// these dep flags are unsupported yet, cmake doesn't use them
 				invocation.err = fmt.Errorf("unsupported option: %s", arg)
 				return
@@ -183,6 +190,7 @@ func ParseCmdLineInvocation(daemon *Daemon, cwd string, cmdLine []string) (invoc
 				return
 			}
 			invocation.cppInFile = pathAbs(cwd, arg)
+			invocation.depsFlags.SetCmdInputFile(arg)
 			continue
 		} else if strings.HasSuffix(arg, ".o") || strings.HasPrefix(arg, ".so") || strings.HasSuffix(arg, ".a") {
 			invocation.invokeType = invokedForLinking

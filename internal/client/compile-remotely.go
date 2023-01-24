@@ -27,7 +27,8 @@ func CompileCppRemotely(daemon *Daemon, invocation *Invocation, remote *RemoteCo
 
 	// if cxx is launched with -MD/-MF flags, it generates a .o.d file (a dependency file with include list)
 	// we do it on a client side (moreover, they are stripped off cxxArgs and not sent to the remote)
-	if invocation.depsFlags.ShouldGenenateDepFile() {
+	// note, that .o.d file is generated ALONG WITH .o (like "a side effect of compilation")
+	if invocation.depsFlags.ShouldGenerateDepFile() {
 		go func() {
 			depFileName, err := invocation.depsFlags.GenerateAndSaveDepFile(invocation, hFiles)
 			if err == nil {

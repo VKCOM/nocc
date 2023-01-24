@@ -3,3 +3,7 @@
 bin
 cpp-example/build/
 nocc.log
+
+tests/**/*.o
+tests/**/*.d
+tests/**/build
