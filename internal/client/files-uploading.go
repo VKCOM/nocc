@@ -132,14 +132,17 @@ func uploadFileByChunks(stream pb.CompilationService_UploadFileStreamClient, chu
 	defer fd.Close()
 
 	var n int
+	var sentChunks = 0 // used to correctly handle empty files (when Read returns EOF immediately)
 	for {
 		n, err = fd.Read(chunkBuf)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
+		if err != nil && err != io.EOF {
 			return err
 		}
+		if err == io.EOF && sentChunks != 0 {
+			break
+		}
+		sentChunks++
+
 		err = stream.Send(&pb.UploadFileChunkRequest{
 			ClientID:  clientID,
 			SessionID: sessionID,

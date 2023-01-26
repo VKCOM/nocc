@@ -34,9 +34,10 @@ type Invocation struct {
 	cxxIDirs   IncludeDirs // -I / -iquote / -isystem go here
 	depsFlags  DepCmdFlags // -MD -MF file and others, used for .d files generation (not passed to server)
 
-	doneState int32 // see Invocation.DoneRecvObj
-	wgUpload  sync.WaitGroup
-	wgRecv    sync.WaitGroup
+	waitUploads int32 // files still waiting for upload to finish; 0 releases wgUpload; see Invocation.DoneUploadFile
+	doneRecv    int32 // 1 if o file received or failed receiving; 1 releases wgRecv; see Invocation.DoneRecvObj
+	wgUpload    sync.WaitGroup
+	wgRecv      sync.WaitGroup
 
 	// when remote compilation starts, the server starts a server.Session (with the same sessionID)
 	// after it finishes, we have these fields filled (and objOutFile saved)
@@ -232,7 +233,7 @@ func (invocation *Invocation) CollectDependentIncludes(disableOwnIncludes bool) 
 }
 
 func (invocation *Invocation) DoneRecvObj(err error) {
-	if atomic.SwapInt32(&invocation.doneState, 1) == 0 {
+	if atomic.SwapInt32(&invocation.doneRecv, 1) == 0 {
 		if err != nil {
 			invocation.err = err
 		}
@@ -244,11 +245,16 @@ func (invocation *Invocation) DoneUploadFile(err error) {
 	if err != nil {
 		invocation.err = err
 	}
+	atomic.AddInt32(&invocation.waitUploads, -1)
 	invocation.wgUpload.Done() // will end up after all required files uploaded/failed
 }
 
 func (invocation *Invocation) ForceInterrupt(err error) {
-	// hopefully, an invocation can't hang on uploading files, it could hang only on waiting for obj
 	logClient.Error("force interrupt", "sessionID", invocation.sessionID, invocation.cppInFile, err)
+	// release invocation.wgUpload
+	for atomic.LoadInt32(&invocation.waitUploads) != 0 {
+		invocation.DoneUploadFile(err)
+	}
+	// release invocation.wgDone
 	invocation.DoneRecvObj(err)
 }
