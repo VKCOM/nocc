@@ -110,7 +110,7 @@ func Test_MDMF(t *testing.T) {
 }
 
 func Test_MTMTMQMQMMP(t *testing.T) {
-	var cmdLineStr = "g++ -MD -MF dt/dep1/out.d -MT func.i -MT $(#func.j) -MQ $(#func.k) -MQ some/long/option/will/be/placed/on/next/line/func.o -o dt/dep1/1111.cpp.o dt/./dep1/1.cpp -MMD"
+	var cmdLineStr = "g++ -MD -MF dt/dep1/out.d -MQ $(#func.k) -MQ some/long/long/long/long/option/will/be/placed/on/next/line/func.o -MT func.i -MT $(#func.j) -o dt/dep1/1111.cpp.o dt/./dep1/1.cpp -MMD"
 	runGccWithNoccAndCompareOutputDepfiles(t, cmdLineStr, "dt/dep1", "dt/dep1/out.d")
 }
 
