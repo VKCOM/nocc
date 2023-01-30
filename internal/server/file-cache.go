@@ -180,7 +180,7 @@ func (cache *FileCache) purgeLastElementsTillLimit(cacheLimit int64) {
 	for atomic.LoadInt64(&cache.totalSizeOnDisk) > cacheLimit {
 		var removingFile cachedFile
 		cache.mu.Lock()
-		if tail := cache.lruTail; tail != nil {
+		if tail := cache.lruTail; tail != nil && tail.prev != nil {
 			cache.lruTail = tail.prev
 			cache.lruTail.next = nil
 			removingFile = cache.table[tail.key]
