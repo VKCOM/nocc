@@ -87,17 +87,29 @@ func (client *Client) MapServerAbsToClientFileName(serverFileName string) string
 	return strings.TrimPrefix(serverFileName, client.workingDir)
 }
 
-func (client *Client) StartNewSession(in *pb.StartCompilationSessionRequest) (*Session, error) {
-	cppInFile := client.MapClientFileNameToServerAbs(in.CppInFile)
+func (client *Client) StartNewSession(in *pb.StartCompilationSessionRequest, systemHeaders *SystemHeadersCache) (*Session, error) {
+	var cppInFile string
+	var objOutFile string
+
+	// when compiling a user file, it will be saved to /.../{clientID}/{clientFileName}, .o will be placed nearby
+	// when compiling a system file, session.cppInFile points to it directly, but save .o inside tmp
+	if systemHeaders.IsSystemHeaderPath(in.CppInFile) {
+		cppInFile = in.CppInFile
+		objOutFile = client.MapClientFileNameToServerAbs(path.Base(cppInFile)) + "." + strconv.Itoa(int(rand.Int31())) + ".o"
+	} else {
+		cppInFile = client.MapClientFileNameToServerAbs(in.CppInFile)
+		objOutFile = cppInFile + "." + strconv.Itoa(int(rand.Int31())) + ".o"
+	}
+
 	newSession := &Session{
 		sessionID:  in.SessionID,
-		files:      make([]*fileInClientDir, len(in.RequiredFiles)),
-		cxxName:    in.CxxName,
 		cppInFile:  cppInFile,
-		objOutFile: cppInFile + "." + strconv.Itoa(int(rand.Int31())) + ".o",
+		objOutFile: objOutFile,
+		cxxName:    in.CxxName,
+		cxxCmdLine: client.PrepareServerCxxCmdLine(systemHeaders, in.CxxArgs, in.CxxIDirs, cppInFile, objOutFile),
 		client:     client,
+		files:      make([]*fileInClientDir, len(in.RequiredFiles)),
 	}
-	newSession.cxxCmdLine = newSession.PrepareServerCxxCmdLine(in.CxxArgs, in.CxxIDirs)
 
 	for index, meta := range in.RequiredFiles {
 		fileSHA256 := common.SHA256{B0_7: meta.SHA256_B0_7, B8_15: meta.SHA256_B8_15, B16_23: meta.SHA256_B16_23, B24_31: meta.SHA256_B24_31}
@@ -153,6 +165,27 @@ func (client *Client) GetSessionsNotStartedCompilation() []*Session {
 	}
 	client.mu.RUnlock()
 	return sessions
+}
+
+// PrepareServerCxxCmdLine prepares a command line for cxx invocation.
+// Notably, options like -Wall and -fpch-preprocess are pushed as is,
+// but include dirs like /home/alice/headers need to be remapped to point to server dir.
+func (client *Client) PrepareServerCxxCmdLine(systemHeaders *SystemHeadersCache, cxxArgs []string, cxxIDirs []string, cppInFile string, objOutFile string) []string {
+	cxxCmdLine := make([]string, 0, len(cxxIDirs)+len(cxxArgs)+3)
+
+	// loop through -I {dir} / -include {file} / etc. (format is guaranteed), converting client {dir} to server path
+	for i := 0; i < len(cxxIDirs); i += 2 {
+		arg := cxxIDirs[i]
+		serverIdir := cxxIDirs[i+1]
+		if !systemHeaders.IsSystemHeaderPath(serverIdir) { // leave /usr/src/googletest and similar as is
+			serverIdir = client.MapClientFileNameToServerAbs(serverIdir)
+		}
+		cxxCmdLine = append(cxxCmdLine, arg, serverIdir)
+	}
+	// append -Wall and other cxx args
+	cxxCmdLine = append(cxxCmdLine, cxxArgs...)
+	// append output and input (they won't take part in obj cache key calculation, like -I)
+	return append(cxxCmdLine, "-o", objOutFile, cppInFile)
 }
 
 // StartUsingFileInSession is called on a session creation for a .cpp file and all dependencies.

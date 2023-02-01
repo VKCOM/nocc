@@ -31,25 +31,18 @@ func MakeSystemHeadersCache() (*SystemHeadersCache, error) {
 	}, nil
 }
 
-func (sHeaders *SystemHeadersCache) IsSystemHeader(headerPath string, fileSize int64, fileSHA256 common.SHA256) bool {
-	if !strings.HasPrefix(headerPath, "/usr/") && !strings.HasPrefix(headerPath, "/Library/") {
-		return false
-	}
+func (sHeaders *SystemHeadersCache) IsSystemHeaderPath(pathOrFilename string) bool {
+	return strings.HasPrefix(pathOrFilename, "/usr/") ||
+		strings.HasPrefix(pathOrFilename, "/Library/")
+}
 
-	sHeaders.mu.RLock()
-	header, exists := sHeaders.headers[headerPath]
-	sHeaders.mu.RUnlock()
-
-	if exists {
-		return header != nil && header.fileSize == fileSize && header.fileSHA256 == fileSHA256
-	}
-
+func (sHeaders *SystemHeadersCache) calculateFileHashesAndSave(headerPath string) *systemHeader {
 	stat, err := os.Stat(headerPath)
 	if err != nil {
 		sHeaders.mu.Lock()
-		sHeaders.headers[headerPath] = nil // means that headerPath doesn't exist (=> not a system header)
+		sHeaders.headers[headerPath] = nil // store nil for non-existing headers
 		sHeaders.mu.Unlock()
-		return false
+		return nil
 	}
 
 	headerSHA256, err := common.GetFileSHA256(headerPath)
@@ -57,15 +50,39 @@ func (sHeaders *SystemHeadersCache) IsSystemHeader(headerPath string, fileSize i
 		sHeaders.mu.Lock()
 		sHeaders.headers[headerPath] = nil
 		sHeaders.mu.Unlock()
-		return false
+		return nil
 	}
 
-	header = &systemHeader{headerPath, stat.Size(), headerSHA256}
+	header := &systemHeader{headerPath, stat.Size(), headerSHA256}
 	sHeaders.mu.Lock()
 	sHeaders.headers[headerPath] = header
 	sHeaders.mu.Unlock()
 
-	return header.fileSize == fileSize && header.fileSHA256 == fileSHA256
+	return header
+}
+
+func (sHeaders *SystemHeadersCache) DoesFileHaveHashes(headerPath string, fileSize int64, fileSHA256 common.SHA256) bool {
+	if !sHeaders.IsSystemHeaderPath(headerPath) {
+		return false
+	}
+
+	sHeaders.mu.RLock()
+	header, seen := sHeaders.headers[headerPath]
+	sHeaders.mu.RUnlock()
+
+	if !seen {
+		header = sHeaders.calculateFileHashesAndSave(headerPath)
+	}
+
+	return header != nil && header.fileSize == fileSize && header.fileSHA256 == fileSHA256
+}
+
+func (sHeaders *SystemHeadersCache) DoesFileExist(headerPath string) bool {
+	sHeaders.mu.RLock()
+	header, seen := sHeaders.headers[headerPath]
+	sHeaders.mu.RUnlock()
+
+	return (seen && header != nil) || sHeaders.calculateFileHashesAndSave(headerPath) != nil
 }
 
 func (sHeaders *SystemHeadersCache) Count() int64 {

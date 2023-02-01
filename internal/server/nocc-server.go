@@ -106,7 +106,7 @@ func (s *NoccServer) StartCompilationSession(_ context.Context, in *pb.StartComp
 		return nil, status.Errorf(codes.Unauthenticated, "clientID %s not found; probably, the server was restarted just now", in.ClientID)
 	}
 
-	session, err := client.StartNewSession(in)
+	session, err := client.StartNewSession(in, s.SystemHeaders)
 	if err != nil {
 		atomic.AddInt64(&s.Stats.sessionsFailedOpen, 1)
 		logServer.Error("failed to open session", "clientID", in.ClientID, "sessionID", in.SessionID, err)
@@ -141,11 +141,23 @@ func (s *NoccServer) StartCompilationSession(_ context.Context, in *pb.StartComp
 			file.uploadStartTime = time.Now()
 
 			clientFileName := client.MapServerAbsToClientFileName(file.serverFileName)
-			if s.SystemHeaders.IsSystemHeader(clientFileName, file.fileSize, file.fileSHA256) {
-				logServer.Info(2, "file", clientFileName, "is a system header, no need to upload")
+			isSystem := s.SystemHeaders.IsSystemHeaderPath(clientFileName)
+
+			if isSystem && s.SystemHeaders.DoesFileHaveHashes(clientFileName, file.fileSize, file.fileSHA256) {
+				logServer.Info(2, "system header", clientFileName, "no need to upload")
 				file.state = fsFileStateUploaded
 				file.serverFileName = clientFileName // "/usr/include/..." — the same system header as on client
 				continue
+			}
+			if isSystem { // system headers mismatch, it's an error; nocc requires client/server environment to be equal
+				var errTxt string
+				if s.SystemHeaders.DoesFileExist(clientFileName) {
+					errTxt = "doesn't exist on a server"
+				} else {
+					errTxt = "mismatches between server and client"
+				}
+				logServer.Error("system header", clientFileName, errTxt)
+				return nil, fmt.Errorf("system header %s %s; ensure that /usr and C++ compilers are the same everywhere", clientFileName, errTxt)
 			}
 			if s.SrcFileCache.CreateHardLinkFromCache(file.serverFileName, file.fileSHA256) {
 				logServer.Info(2, "file", clientFileName, "is in src-cache, no need to upload")

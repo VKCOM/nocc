@@ -36,24 +36,6 @@ type Session struct {
 	cxxDuration int32
 }
 
-// PrepareServerCxxCmdLine prepares a command line for cxx invocation.
-// Notably, options like -Wall and -fpch-preprocess are pushed as is,
-// but include dirs like /home/alice/headers need to be remapped to point to server dir.
-func (session *Session) PrepareServerCxxCmdLine(cxxArgs []string, cxxIDirs []string) []string {
-	cxxCmdLine := make([]string, 0, len(cxxIDirs)+len(cxxArgs)+3)
-
-	// loop through -I {dir} / -include {file} / etc. (format is guaranteed), converting client {dir} to server path
-	for i := 0; i < len(cxxIDirs); i += 2 {
-		arg := cxxIDirs[i]
-		serverIdir := session.client.MapClientFileNameToServerAbs(cxxIDirs[i+1])
-		cxxCmdLine = append(cxxCmdLine, arg, serverIdir)
-	}
-	// append -Wall and other cxx args
-	cxxCmdLine = append(cxxCmdLine, cxxArgs...)
-	// append output and input (they won't take part in obj cache key calculation, like -I)
-	return append(cxxCmdLine, "-o", session.objOutFile, session.cppInFile)
-}
-
 // StartCompilingObjIfPossible executes cxx if all dependent files (.cpp/.h/.nocc-pch/etc.) are ready.
 // They have either been uploaded by the client or already taken from src cache.
 func (session *Session) StartCompilingObjIfPossible(noccServer *NoccServer) {

@@ -213,6 +213,11 @@ func ParseCmdLineInvocation(daemon *Daemon, cwd string, cmdLine []string) (invoc
 	} else {
 		invocation.err = fmt.Errorf("unsupported output file extension: %s", invocation.objOutFile)
 	}
+
+	// todo del
+	if strings.HasSuffix(invocation.cppInFile, ".cc") {
+		logClient.Info(0, "cmdLine", cmdLine)
+	}
 	return
 }
 
