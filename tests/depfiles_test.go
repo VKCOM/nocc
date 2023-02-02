@@ -109,8 +109,13 @@ func Test_MDMF(t *testing.T) {
 	runGccWithNoccAndCompareOutputDepfiles(t, cmdLineStr, "dt/dep1", "dt/dep1/1.cpp.o.d")
 }
 
-func Test_MTMTMQMQMMP(t *testing.T) {
-	var cmdLineStr = "g++ -MD -MF dt/dep1/out.d -MQ $(#func.k) -MQ some/long/long/long/long/option/will/be/placed/on/next/line/func.o -MT func.i -MT $(#func.j) -o dt/dep1/1111.cpp.o dt/./dep1/1.cpp -MMD"
+func Test_MQMQMQMQMMP(t *testing.T) {
+	var cmdLineStr = "g++ -MD -MF dt/dep1/out.d -MQ $(#func.k) -MQ some/long/long/long/long/option/will/be/placed/on/next/line/func.o -MQ func.i -MQ $(#func.j) -o dt/dep1/1111.cpp.o dt/./dep1/1.cpp -MMD"
+	runGccWithNoccAndCompareOutputDepfiles(t, cmdLineStr, "dt/dep1", "dt/dep1/out.d")
+}
+
+func Test_MTMTMTMTMMP(t *testing.T) {
+	var cmdLineStr = "g++ -MD -MF dt/dep1/out.d -MT $(#func.k) -MT some/long/long/long/long/option/will/be/placed/on/next/line/func.o -MT func.i -MT $(#func.j) -o dt/dep1/1111.cpp.o dt/./dep1/1.cpp -MMD"
 	runGccWithNoccAndCompareOutputDepfiles(t, cmdLineStr, "dt/dep1", "dt/dep1/out.d")
 }
 

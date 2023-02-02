@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/VKCOM/nocc/internal/common"
 )
 
 type CxxLauncher struct {
@@ -16,7 +19,7 @@ type CxxLauncher struct {
 
 func MakeCxxLauncher() (*CxxLauncher, error) {
 	return &CxxLauncher{
-		chanToCompile: make(chan *Session, 50),
+		chanToCompile: make(chan *Session, runtime.NumCPU()),
 	}, nil
 }
 
@@ -26,7 +29,35 @@ func (cxxLauncher *CxxLauncher) EnterInfiniteLoopToCompile(noccServer *NoccServe
 	}
 }
 
+// symlinkSystemFilesToClientWorkingDir deals with the following situation.
+// If session.cppInFile doesn't exist on a server, it means the following: an input file is in /usr,
+// which is equal on a server and on a client, and it just hasn't been uploaded.
+// In that case, cppInFile = /tmp/.../usr/..., clientFileName = /usr/..., cxxArgs contain -I /tmp/.../usr/...
+// To make compilation succeed in workingDir, symlink all dependencies from a system folder into workingDir.
+// Note, that we use symlinks, because we have no permissions on hardlinks for that locations.
+func (cxxLauncher *CxxLauncher) symlinkSystemFilesToClientWorkingDir(session *Session, systemHeaders *SystemHeadersCache) {
+	for _, file := range session.files {
+		// for system headers, file.serverFileName is /usr/..., not /tmp/...
+		if systemHeaders.IsSystemHeader(file.serverFileName, file.fileSize, file.fileSHA256) {
+			clientFileName := file.serverFileName
+			serverFileName := session.client.MapClientFileNameToServerAbs(clientFileName)
+
+			logServer.Info(2, "symlink", clientFileName, "to", serverFileName)
+			_ = common.MkdirForFile(serverFileName)
+			if err := os.Symlink(clientFileName, serverFileName); err != nil && !os.IsExist(err) {
+				logServer.Error("symlink from", clientFileName, "failed", err)
+			}
+		}
+	}
+}
+
 func (cxxLauncher *CxxLauncher) launchServerCxxForCpp(session *Session, noccServer *NoccServer) {
+	// read a comment above symlinkSystemFilesToClientWorkingDir()
+	if _, err := os.Stat(session.cppInFile); os.IsNotExist(err) {
+		logServer.Info(1, "not found cpp", session.cppInFile, ", symlink system files to", session.client.workingDir)
+		cxxLauncher.symlinkSystemFilesToClientWorkingDir(session, noccServer.SystemHeaders)
+	}
+
 	cxxCommand := exec.Command(session.cxxName, session.cxxCmdLine...)
 	cxxCommand.Dir = session.client.workingDir
 	var cxxStdout, cxxStderr bytes.Buffer
@@ -38,11 +69,9 @@ func (cxxLauncher *CxxLauncher) launchServerCxxForCpp(session *Session, noccServ
 	start := time.Now()
 	err := cxxCommand.Run()
 	session.cxxDuration = int32(time.Since(start).Milliseconds())
-	atomic.AddInt64(&noccServer.Stats.cxxTotalDurationMs, int64(session.cxxDuration))
-
 	session.cxxExitCode = int32(cxxCommand.ProcessState.ExitCode())
-	session.cxxStdout = cxxLauncher.patchStdoutDropServerPaths(session.client, cxxStdout.Bytes())
-	session.cxxStderr = cxxLauncher.patchStdoutDropServerPaths(session.client, cxxStderr.Bytes())
+	session.cxxStdout = cxxStdout.Bytes()
+	session.cxxStderr = cxxStderr.Bytes()
 	if len(session.cxxStderr) == 0 && err != nil {
 		session.cxxStderr = []byte(fmt.Sprintln(err))
 	}
@@ -61,6 +90,9 @@ func (cxxLauncher *CxxLauncher) launchServerCxxForCpp(session *Session, noccServ
 		}
 	}
 
+	atomic.AddInt64(&noccServer.Stats.cxxTotalDurationMs, int64(session.cxxDuration))
+	session.cxxStdout = cxxLauncher.patchStdoutDropServerPaths(session.client, session.cxxStdout)
+	session.cxxStderr = cxxLauncher.patchStdoutDropServerPaths(session.client, session.cxxStderr)
 	session.PushToClientReadyChannel()
 }
 
