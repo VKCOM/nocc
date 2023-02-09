@@ -33,6 +33,7 @@ message StartClientRequest {
     string HostUserName = 2;
     string ClientVersion = 3;
     bool DisableObjCache = 10;
+    string AllRemotesDelim = 20;
 }
 
 message StartClientReply {
@@ -98,6 +99,14 @@ message StatusReply {
     int64 LogFileSize = 6;
     int64 SrcCacheSize = 7;
     int64 ObjCacheSize = 8;
+    int64 ULimit = 9;
+    string UName = 10;
+    int64 SessionsTotal = 11;
+    int64 SessionsActive = 12;
+    int64 CxxCalls = 20;
+    int64 CxxDurMore10sec = 21;
+    int64 CxxDurMore30sec = 22;
+    repeated string UniqueRemotes = 30;
 }
 
 message DumpLogsRequest {

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/VKCOM/nocc/internal/common"
 	"github.com/VKCOM/nocc/pb"
 )
 
@@ -63,6 +62,10 @@ func requestRemoteDumpLogsOne(remoteHostPort string, dumpToFolder string, resCha
 	defer grpcClient.Clear()
 
 	stream, err := grpcClient.pb.DumpLogs(grpcClient.callContext, &pb.DumpLogsRequest{})
+	if err != nil {
+		resChannel <- rpcDumpLogsRes{err: err, remoteHostPort: remoteHostPort}
+		return
+	}
 	bytesReceived := make([]int, 0)
 
 	for {
@@ -75,7 +78,7 @@ func requestRemoteDumpLogsOne(remoteHostPort string, dumpToFolder string, resCha
 			break
 		}
 
-		logOutFile := path.Join(dumpToFolder, strings.Split(remoteHostPort, ":")[0]+firstChunk.LogFileExt)
+		logOutFile := path.Join(dumpToFolder, ExtractRemoteHostWithoutPort(remoteHostPort)+firstChunk.LogFileExt)
 		nBytes, err := receiveLogFileByChunks(stream, firstChunk, logOutFile)
 		if err != nil {
 			resChannel <- rpcDumpLogsRes{err: err, remoteHostPort: remoteHostPort}
@@ -122,42 +125,70 @@ func RequestRemoteStatus(remoteNoccHosts []string) {
 
 	nOk := 0
 	nTotal := len(remoteNoccHosts)
-	uniqueVersions := make(map[string]int)
-	uniqueArgs := make(map[string]int)
-	uniqueGcc := make(map[string]int)
-	uniqueClang := make(map[string]int)
+	noccVersionsByRemote := make(map[string][]string)
+	noccServerArgsByRemote := make(map[string][]string)
+	gccVersionsByRemote := make(map[string][]string)
+	clangVersionsByRemote := make(map[string][]string)
+	ulimitByRemote := make(map[string][]string)
+	unameByRemote := make(map[string][]string)
+
+	addByRemote := func(mapByRemote map[string][]string, key string, remoteHost string) {
+		if _, ok := mapByRemote[key]; !ok {
+			mapByRemote[key] = make([]string, 0)
+		}
+		mapByRemote[key] = append(mapByRemote[key], remoteHost)
+	}
 
 	for range remoteNoccHosts {
 		res := <-resChannel
-		var reply *pb.StatusReply = res.reply
+		var r *pb.StatusReply = res.reply
+		remoteHost := ExtractRemoteHostWithoutPort(res.remoteHostPort)
 
 		if res.err != nil {
-			fmt.Printf("Server \033[36m%s\033[0m unavailable: %v\n", res.remoteHostPort, res.err)
+			fmt.Printf("Server \033[36m%s\033[0m \033[31munavailable\033[0m: %v\n", remoteHost, res.err)
 			continue
 		}
 
-		fmt.Printf("Server \033[36m%s\033[0m \u001B[32mok\u001B[0m (uptime %s)\n", res.remoteHostPort, time.Duration(reply.ServerUptime).Truncate(time.Second))
-		fmt.Println("  Processing time:", res.processingTime.Truncate(time.Microsecond))
-		fmt.Println("  Log file size KB:", reply.LogFileSize/1024)
-		fmt.Println("  Src cache size KB:", reply.SrcCacheSize/1024)
-		fmt.Println("  Obj cache size KB:", reply.ObjCacheSize/1024)
-		fmt.Println("  nocc-server version:", reply.ServerVersion)
-		fmt.Println("  nocc-server cmd args:", reply.ServerArgs)
-		fmt.Println("  g++:", reply.GccVersion)
-		fmt.Println("  clang:", reply.ClangVersion)
-		if reply.ServerVersion != common.GetVersion() {
-			fmt.Println("\033[36mnocc-server version differs from current client\033[0m")
+		fmt.Printf("Server \033[36m%s\033[0m \033[32mok\033[0m (uptime %s)\n", remoteHost, time.Duration(r.ServerUptime).Truncate(time.Second))
+		fmt.Printf("  Processing time: %d ms\n", res.processingTime.Milliseconds())
+		fmt.Printf("  Disk consumption: log %d KB, src cache %d KB, obj cache %d KB\n", r.LogFileSize/1024, r.SrcCacheSize/1024, r.ObjCacheSize/1024)
+		fmt.Printf("  Activity: sessions total %d, active %d\n", r.SessionsTotal, r.SessionsActive)
+		fmt.Printf("  Cxx: calls %d, more10sec %d, more30sec %d\n", r.CxxCalls, r.CxxDurMore10Sec, r.CxxDurMore30Sec)
+
+		if len(r.UniqueRemotes) > 1 {
+			fmt.Printf("  \033[31mnon-unique remotes\033[0m:\n")
+			for _, u := range r.UniqueRemotes {
+				fmt.Printf("    %s\n", u)
+			}
 		}
 
 		nOk++
-		uniqueVersions[reply.ServerVersion]++
-		uniqueArgs[strings.Join(reply.ServerArgs, " ")]++
-		uniqueGcc[reply.GccVersion]++
-		uniqueClang[reply.ClangVersion]++
+		addByRemote(noccVersionsByRemote, r.ServerVersion, remoteHost)
+		addByRemote(noccServerArgsByRemote, strings.Join(r.ServerArgs, " "), remoteHost)
+		addByRemote(gccVersionsByRemote, r.GccVersion, remoteHost)
+		addByRemote(clangVersionsByRemote, r.ClangVersion, remoteHost)
+		addByRemote(ulimitByRemote, fmt.Sprintf("ulimit %d", r.ULimit), remoteHost)
+		addByRemote(unameByRemote, r.UName, remoteHost)
 	}
 
-	if len(remoteNoccHosts) == 1 {
+	if len(remoteNoccHosts) == 1 || nOk == 0 {
 		return
+	}
+
+	printEqualOfDiff := func(mapByRemote map[string][]string, msgAllEqual string, msgDiff string) {
+		if len(mapByRemote) == 1 {
+			var firstKey string
+			for k := range mapByRemote {
+				firstKey = k
+				break
+			}
+			fmt.Printf("  %s:\n    %s\n", msgAllEqual, firstKey)
+			return
+		}
+		fmt.Printf("\033[31m  %s\033[0m\n", msgDiff)
+		for k, hosts := range mapByRemote {
+			fmt.Printf("    * \033[1m%s\033[0m\n      %s\n", k, strings.Join(hosts, ", "))
+		}
 	}
 
 	fmt.Printf("\033[1mSummary:\033[00m\n")
@@ -166,26 +197,12 @@ func RequestRemoteStatus(remoteNoccHosts []string) {
 	} else {
 		fmt.Printf("\033[31m  ok %d / %d\033[0m\n", nOk, nTotal)
 	}
-	if len(uniqueVersions) == 1 {
-		fmt.Println("  all nocc versions are the same")
-	} else {
-		fmt.Println("\033[31m  different nocc versions\033[0m\n  ", uniqueVersions)
-	}
-	if len(uniqueArgs) == 1 {
-		fmt.Println("  all nocc cmd args are the same")
-	} else {
-		fmt.Println("\033[31m  different nocc cmd args\033[0m\n  ", uniqueArgs)
-	}
-	if len(uniqueGcc) == 1 {
-		fmt.Println("  all g++ versions are the same")
-	} else {
-		fmt.Println("\033[31m  different g++ versions\033[0m\n  ", uniqueGcc)
-	}
-	if len(uniqueClang) == 1 {
-		fmt.Println("  all clang versions are the same")
-	} else {
-		fmt.Println("\033[31m  different clang versions\033[0m\n  ", uniqueClang)
-	}
+	printEqualOfDiff(noccVersionsByRemote, "nocc versions equal", "different nocc versions")
+	printEqualOfDiff(noccServerArgsByRemote, "nocc cmd args equal", "different nocc cmd args")
+	printEqualOfDiff(gccVersionsByRemote, "g++ versions equal", "different g++ versions")
+	printEqualOfDiff(clangVersionsByRemote, "clang versions equal", "different clang versions")
+	printEqualOfDiff(ulimitByRemote, "ulimit equal", "different ulimit")
+	printEqualOfDiff(unameByRemote, "uname equal", "different uname")
 }
 
 // RequestRemoteDumpLogs sends the rpc /DumpLogs request for all hosts
@@ -206,9 +223,10 @@ func RequestRemoteDumpLogs(remoteNoccHosts []string, dumpToFolder string) {
 
 	for range remoteNoccHosts {
 		res := <-resChannel
+		remoteHost := ExtractRemoteHostWithoutPort(res.remoteHostPort)
 
 		if res.err != nil {
-			fmt.Printf("Server \033[36m%s\033[0m unavailable: %v\n", res.remoteHostPort, res.err)
+			fmt.Printf("Server \033[36m%s\033[0m unavailable: %v\n", remoteHost, res.err)
 			continue
 		}
 
@@ -216,7 +234,7 @@ func RequestRemoteDumpLogs(remoteNoccHosts []string, dumpToFolder string) {
 		for _, nBytes := range res.bytesReceived {
 			strBytes += fmt.Sprintf("%d ", nBytes)
 		}
-		fmt.Printf("Server \033[36m%s\033[0m dumped %d files (%sbytes)\n", res.remoteHostPort, len(res.bytesReceived), strBytes)
+		fmt.Printf("Server \033[36m%s\033[0m dumped %d files (%sbytes)\n", remoteHost, len(res.bytesReceived), strBytes)
 		nOk++
 	}
 
@@ -241,13 +259,14 @@ func RequestDropAllCaches(remoteNoccHosts []string) {
 	for range remoteNoccHosts {
 		res := <-resChannel
 		var reply *pb.DropAllCachesReply = res.reply
+		remoteHost := ExtractRemoteHostWithoutPort(res.remoteHostPort)
 
 		if res.err != nil {
-			fmt.Printf("Server \033[36m%s\033[0m unavailable: %v\n", res.remoteHostPort, res.err)
+			fmt.Printf("Server \033[36m%s\033[0m unavailable: %v\n", remoteHost, res.err)
 			continue
 		}
 
-		fmt.Printf("Server \033[36m%s\033[0m dropped %d src files and %d obj files\n", res.remoteHostPort, reply.DroppedSrcFiles, reply.DroppedObjFiles)
+		fmt.Printf("Server \033[36m%s\033[0m dropped %d src files and %d obj files\n", remoteHost, reply.DroppedSrcFiles, reply.DroppedObjFiles)
 		nOk++
 	}
 

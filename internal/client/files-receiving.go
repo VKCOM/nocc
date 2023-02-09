@@ -153,7 +153,7 @@ func receiveObjFileByChunks(stream pb.CompilationService_RecvCompiledObjStreamCl
 		return errWrite, false
 	}
 
-	fileTmp, errWrite := common.OpenTempFile(objOutFile, false)
+	fileTmp, errWrite := common.OpenTempFile(objOutFile)
 	if errWrite == nil {
 		_, errWrite = fileTmp.Write(firstChunk.ChunkBody)
 	}

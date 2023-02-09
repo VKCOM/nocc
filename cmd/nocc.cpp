@@ -44,7 +44,7 @@ char *format_time_to_log() {
   static char time_buf[64];
   time_t ts = time(nullptr);
   tm *now = localtime(&ts);
-  sprintf(time_buf, "%d/%02d/%02d %02d:%02d:%02d", 1900 + now->tm_year, 1 + now->tm_mon, now->tm_mday, now->tm_hour, now->tm_min, now->tm_sec);
+  sprintf(time_buf, "%d-%02d-%02d %02d:%02d:%02d", 1900 + now->tm_year, 1 + now->tm_mon, now->tm_mday, now->tm_hour, now->tm_min, now->tm_sec);
   return time_buf;
 }
 
@@ -94,13 +94,6 @@ void __attribute__((noreturn)) execute_cxx_locally(const char *errToPrint, int e
   }
   execvp(ARGV[1], ARGV + 1);
   printf("could not run %s, exit(1)\n", ARGV[1]);
-  exit(1);
-}
-
-void __attribute__((noreturn)) execute_distcc_locally() {
-  ARGV[0] = strdup("distcc");
-  execvp("distcc", ARGV + 0);
-  printf("could not run `distcc`, exit(1)\n");
   exit(1);
 }
 
@@ -277,13 +270,6 @@ int main(int argc, char *argv[]) {
   if (NOCC_GO_EXECUTABLE == nullptr) {
     fprintf(stderr, "Error: to make `nocc` run, set NOCC_GO_EXECUTABLE=/path/to/nocc-daemon env variable\n");
     exit(1);
-  }
-
-  // this possible fallback will be available for some time just in case
-  char *env_fallback_to_distcc = getenv("NOCC_FALLBACK_TO_DISTCC");
-  bool fallback_to_distcc = env_fallback_to_distcc != nullptr && env_fallback_to_distcc[0] == '1';
-  if (fallback_to_distcc) {
-    execute_distcc_locally();
   }
 
   if (ARGC == 2 && !strcmp(ARGV[1], "start")) {

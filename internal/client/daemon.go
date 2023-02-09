@@ -37,6 +37,7 @@ type Daemon struct {
 
 	listener          *DaemonUnixSockListener
 	remoteConnections []*RemoteConnection
+	allRemotesDelim   string
 	localCxxThrottle  chan struct{}
 
 	disableObjCache    bool
@@ -77,7 +78,18 @@ func detectHostUserName() string {
 	return curUser.Username
 }
 
-func MakeDaemon(remoteNoccHosts []string, disableObjCache bool, disableOwnIncludes bool, localCxxQueueSize int64) (*Daemon, error) {
+func MakeDaemon(remoteNoccHosts []string, disableObjCache bool, disableOwnIncludes bool, maxLocalCxxProcesses int64, connectTimeoutMs int64) (*Daemon, error) {
+	// send env NOCC_SERVERS on connect everywhere
+	// this is for debugging purpose: in production, all clients should have the same servers list
+	// to ensure this, just grep server logs: only one unique string should appear
+	allRemotesDelim := ""
+	for _, remoteHostPort := range remoteNoccHosts {
+		if allRemotesDelim != "" {
+			allRemotesDelim += ","
+		}
+		allRemotesDelim += ExtractRemoteHostWithoutPort(remoteHostPort)
+	}
+
 	// env NOCC_SERVERS and others are supposed to be the same between `nocc` invocations
 	// (in practice, this is true, as the first `nocc` invocation has no precedence over any other in a bunch)
 	daemon := &Daemon{
@@ -85,23 +97,36 @@ func MakeDaemon(remoteNoccHosts []string, disableObjCache bool, disableOwnInclud
 		quitChan:           make(chan int),
 		clientID:           detectClientID(),
 		hostUserName:       detectHostUserName(),
-		remoteConnections:  make([]*RemoteConnection, 0, len(remoteNoccHosts)),
-		localCxxThrottle:   make(chan struct{}, localCxxQueueSize),
+		remoteConnections:  make([]*RemoteConnection, len(remoteNoccHosts)),
+		allRemotesDelim:    allRemotesDelim,
+		localCxxThrottle:   make(chan struct{}, maxLocalCxxProcesses),
 		disableOwnIncludes: disableOwnIncludes,
 		disableObjCache:    disableObjCache,
-		disableLocalCxx:    localCxxQueueSize == 0,
+		disableLocalCxx:    maxLocalCxxProcesses == 0,
 		activeInvocations:  make(map[uint32]*Invocation, 300),
 		includesCache:      make(map[string]*IncludesCache, 1),
 	}
 
-	for _, remoteHostPort := range remoteNoccHosts {
-		remote, err := MakeRemoteConnection(daemon, remoteHostPort, 1, 1)
-		if err != nil {
-			remote.isUnavailable = true
-			logClient.Error("error connecting to", remoteHostPort, err)
-		}
-		daemon.remoteConnections = append(daemon.remoteConnections, remote)
+	// connect to all remotes in parallel
+	wg := sync.WaitGroup{}
+	wg.Add(len(remoteNoccHosts))
+
+	ctxConnect, cancelFunc := context.WithTimeout(context.Background(), time.Duration(connectTimeoutMs)*time.Millisecond)
+	defer cancelFunc()
+
+	for index, remoteHostPort := range remoteNoccHosts {
+		go func(index int, remoteHostPort string) {
+			remote, err := MakeRemoteConnection(daemon, remoteHostPort, ctxConnect)
+			if err != nil {
+				remote.isUnavailable = true
+				logClient.Error("error connecting to", remoteHostPort, err)
+			}
+
+			daemon.remoteConnections[index] = remote
+			wg.Done()
+		}(index, remoteHostPort)
 	}
+	wg.Wait()
 
 	return daemon, nil
 }
@@ -202,10 +227,10 @@ func (daemon *Daemon) HandleInvocation(req DaemonSockRequest) DaemonSockResponse
 		}
 
 		remote := daemon.chooseRemoteConnectionForCppCompilation(invocation.cppInFile)
-		invocation.summary.remoteHostPort = remote.remoteHostPort
+		invocation.summary.remoteHost = remote.remoteHost
 
 		if remote.isUnavailable {
-			return daemon.FallbackToLocalCxx(req, fmt.Errorf("remote %s is unavailable", remote.remoteHostPort))
+			return daemon.FallbackToLocalCxx(req, fmt.Errorf("remote %s is unavailable", remote.remoteHost))
 		}
 
 		daemon.mu.Lock()
@@ -292,7 +317,7 @@ func (daemon *Daemon) PeriodicallyInterruptHangedInvocations() {
 			daemon.mu.Lock()
 			for _, invocation := range daemon.activeInvocations {
 				if time.Since(invocation.createTime) > timeoutForceInterruptInvocation {
-					invocation.ForceInterrupt(fmt.Errorf("interrupt sessionID %d after %d sec timeout", invocation.sessionID, int(time.Since(invocation.createTime).Seconds())))
+					invocation.ForceInterrupt(fmt.Errorf("interrupt sessionID %d (%s) after %d sec timeout", invocation.sessionID, invocation.summary.remoteHost, int(time.Since(invocation.createTime).Seconds())))
 				}
 			}
 			daemon.mu.Unlock()

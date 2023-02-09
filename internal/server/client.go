@@ -25,7 +25,7 @@ const (
 // which are saved into a folder with relative paths equal to absolute client paths.
 //
 // For example, a client uploads 3 files: /home/alice/1.cpp, /home/alice/1.h, /usr/include/math.h.
-// They are saved to /tmp/nocc-server/clients/{clientID}/home/alice/1.cpp and so on.
+// They are saved to /tmp/nocc/cpp/clients/{clientID}/home/alice/1.cpp and so on.
 // (if math.h is equal to a server system include /usr/include/math.h, it isn't requested to be uploaded).
 //
 // fileInClientDir also represents files in the process of uploading, before actually saved to a disk (state field).
@@ -48,12 +48,13 @@ type fileInClientDir struct {
 // Every client as a workingDir, where all files uploaded from that client are saved to.
 type Client struct {
 	clientID   string
-	workingDir string    // /tmp/nocc-server/clients/{clientID}
+	workingDir string    // /tmp/nocc/cpp/clients/{clientID}
 	lastSeen   time.Time // to detect when a client becomes inactive
 
 	mu       sync.RWMutex
 	sessions map[uint32]*Session
 	files    map[string]*fileInClientDir // from clientFileName to a server file
+	dirs     map[string]bool             // not to call MkdirAll for every file, key is path.Dir(serverFileName)
 
 	chanDisconnected  chan struct{}
 	chanReadySessions chan *Session
@@ -71,7 +72,7 @@ func (client *Client) makeNewFile(clientFileName string, fileSize int64, fileSHA
 }
 
 // MapClientFileNameToServerAbs converts a client file name to an absolute path on server.
-// For example, /proj/1.cpp maps to /tmp/nocc-server/clients/{clientID}/proj/1.cpp.
+// For example, /proj/1.cpp maps to /tmp/nocc/cpp/clients/{clientID}/proj/1.cpp.
 // Note, that system files like /usr/local/include are required to be equal on both sides.
 // (if not, a server session will fail to start, and a client will fall back to local compilation)
 func (client *Client) MapClientFileNameToServerAbs(clientFileName string) string {
@@ -85,50 +86,43 @@ func (client *Client) MapClientFileNameToServerAbs(clientFileName string) string
 }
 
 // MapServerAbsToClientFileName converts an absolute path on server relatively to the client working dir.
-// For example, /tmp/nocc-server/clients/{clientID}/proj/1.cpp maps to /proj/1.cpp.
+// For example, /tmp/nocc/cpp/clients/{clientID}/proj/1.cpp maps to /proj/1.cpp.
 // If serverFileName is /usr/local/include, it's left as is.
 func (client *Client) MapServerAbsToClientFileName(serverFileName string) string {
 	return strings.TrimPrefix(serverFileName, client.workingDir)
 }
 
-func (client *Client) StartNewSession(in *pb.StartCompilationSessionRequest) (*Session, error) {
+func (client *Client) CreateNewSession(in *pb.StartCompilationSessionRequest) (*Session, error) {
 	newSession := &Session{
-		sessionID:  in.SessionID,
-		files:      make([]*fileInClientDir, len(in.RequiredFiles)),
-		cxxName:    in.CxxName,
-		cppInFile:  in.CppInFile, // as specified in a client cmd line invocation (relative to in.Cwd or abs on a client file system)
-		objOutFile: os.TempDir() + fmt.Sprintf("/%s.%d.%s.o", client.clientID, in.SessionID, path.Base(in.CppInFile)),
-		client:     client,
+		sessionID: in.SessionID,
+		files:     make([]*fileInClientDir, len(in.RequiredFiles)),
+		cxxName:   in.CxxName,
+		cppInFile: in.CppInFile, // as specified in a client cmd line invocation (relative to in.Cwd or abs on a client file system)
+		client:    client,
+		// objOutFile is filled only in cxx is required to be called, see Session.PrepareServerCxxCmdLine()
 	}
-
-	// old clients that don't send this field (they send abs cppInFile)
-	// todo delete later, after upgrading all clients
-	if in.Cwd == "" {
-		newSession.cxxCwd = client.workingDir
-		newSession.cppInFile = client.MapClientFileNameToServerAbs(newSession.cppInFile)
-	} else {
-		newSession.cxxCwd = client.MapClientFileNameToServerAbs(in.Cwd)
-	}
-
-	newSession.cxxCmdLine = newSession.PrepareServerCxxCmdLine(in.CxxArgs, in.CxxIDirs)
 
 	for index, meta := range in.RequiredFiles {
 		fileSHA256 := common.SHA256{B0_7: meta.SHA256_B0_7, B8_15: meta.SHA256_B8_15, B16_23: meta.SHA256_B16_23, B24_31: meta.SHA256_B24_31}
 		file, err := client.StartUsingFileInSession(meta.ClientFileName, meta.FileSize, fileSHA256)
 		newSession.files[index] = file
 		// the only reason why a session can't be created is a dependency conflict:
-		// an old hanging session that is still using a previous version of some .h file (so it can't be removed),
-		// whereas now a client reports that this .h file has another sha256
+		// previously, a client reported that clientFileName has sha256=v1, and now it sends sha256=v2
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	client.mu.Lock()
-	client.sessions[newSession.sessionID] = newSession
-	client.mu.Unlock()
+	// note, that we don't add newSession to client.sessions: it's just created, not registered
+	// (so, it won't be enumerated in a loop inside GetSessionsNotStartedCompilation until registered)
 
 	return newSession, nil
+}
+
+func (client *Client) RegisterCreatedSession(session *Session) {
+	client.mu.Lock()
+	client.sessions[session.sessionID] = session
+	client.mu.Unlock()
 }
 
 func (client *Client) CloseSession(session *Session) {
@@ -136,7 +130,9 @@ func (client *Client) CloseSession(session *Session) {
 	delete(client.sessions, session.sessionID)
 	client.mu.Unlock()
 
-	_ = os.Remove(session.objOutFile)
+	if !session.objCacheExists { // delete /tmp/nocc/obj/cxx-out/this.o (already hard linked to obj cache)
+		_ = os.Remove(session.objOutFile)
+	}
 	session.files = nil
 }
 
@@ -159,7 +155,7 @@ func (client *Client) GetActiveSessionsCount() int {
 func (client *Client) GetSessionsNotStartedCompilation() []*Session {
 	sessions := make([]*Session, 0)
 	client.mu.RLock()
-	for _, session := range client.sessions {
+	for _, session := range client.sessions { // loop over registered sessions
 		if atomic.LoadInt32(&session.compilationStarted) == 0 {
 			sessions = append(sessions, session)
 		}
@@ -173,8 +169,7 @@ func (client *Client) GetSessionsNotStartedCompilation() []*Session {
 // If it already exists, compare client sha256 with what we have (if equal, don't need to upload this file again).
 //
 // The only reason why we can return an error here is a dependency conflict:
-// an old hanging session that is still using a previous version of some .h file (so it can't be removed),
-// whereas now a client reports that this .h file has another sha256.
+// previously, a client reported that clientFileName has sha256=v1, and now it sends sha256=v2.
 func (client *Client) StartUsingFileInSession(clientFileName string, fileSize int64, fileSHA256 common.SHA256) (*fileInClientDir, error) {
 	client.mu.RLock()
 	file := client.files[clientFileName]
@@ -200,34 +195,75 @@ func (client *Client) StartUsingFileInSession(clientFileName string, fileSize in
 	return file, nil
 }
 
-// IsFileUploadFailed checks whether a file should be re-requested.
-// A "failed" upload means that it was finished with an error, or it lasts too long.
+// MkdirAllForSession ensures that all directories for saving files from session exist
+// (they mirror client directory structure in client.workingDir).
+// Instead of calling os.MkdirAll for every uploaded or hard linked file, they are created in advance.
+// Moreover, we need to call os.MkdirAll only once for all files within it (when it appears first time).
+// After this call, every /home/file.h can be saved into /tmp/.../{clientID}/home/file.h.
+func (client *Client) MkdirAllForSession(session *Session) {
+	dirsToCreate := make([]string, 0)
+
+	client.mu.RLock()
+	for _, file := range session.files {
+		lastSlash := len(file.serverFileName) - 1
+		for file.serverFileName[lastSlash] != '/' {
+			lastSlash--
+		}
+		dir := file.serverFileName[0:lastSlash]
+		if exists := client.dirs[dir]; !exists {
+			// session.files (includes order) is often partially sorted, so add fewer duplicates
+			if len(dirsToCreate) == 0 || dirsToCreate[len(dirsToCreate)-1] != dir {
+				dirsToCreate = append(dirsToCreate, dir)
+			}
+		}
+	}
+	if exists := client.dirs[session.cxxCwd]; !exists {
+		dirsToCreate = append(dirsToCreate, session.cxxCwd)
+	}
+	client.mu.RUnlock()
+
+	if len(dirsToCreate) == 0 {
+		return
+	}
+
+	for _, dir := range dirsToCreate {
+		if err := os.MkdirAll(dir, os.ModePerm); err != nil {
+			logServer.Error("can't create dir", dir, err)
+		}
+	}
+
+	client.mu.Lock()
+	for _, dir := range dirsToCreate {
+		client.dirs[dir] = true
+	}
+	client.mu.Unlock()
+}
+
+// IsFileUploadHanged checks whether a file upload lasts too long, and a file should be re-requested.
 // A timeout depends on file size: for instance, .nocc-pch files are big, we'll wait for them for a long time
 // (especially when nocc client uploads it to all servers, the network on a client machine suffers).
-func (client *Client) IsFileUploadFailed(file *fileInClientDir) bool {
-	if file.state == fsFileStateUploaded {
-		return false
-	}
-	if file.state == fsFileStateUploadError {
-		return true
-	}
+func (client *Client) IsFileUploadHanged(fileWithStateUploading *fileInClientDir) bool {
+	passedSec := time.Since(fileWithStateUploading.uploadStartTime).Seconds()
 
-	passedSec := time.Since(file.uploadStartTime).Seconds()
-
-	if file.fileSize > 10*1024*1024 {
+	if fileWithStateUploading.fileSize > 5*1024*1024 {
 		return passedSec > 60
 	}
-	if file.fileSize > 256*1024 {
-		return passedSec > 15
-	}
-	return passedSec > 5
+	return passedSec > 15
 }
 
 func (client *Client) RemoveWorkingDir() {
+	workingDirRenamed := fmt.Sprintf("%s.old.%d", client.workingDir, time.Now().Unix())
+
 	client.mu.Lock()
-	_ = os.RemoveAll(client.workingDir)
+	_ = os.Rename(client.workingDir, workingDirRenamed)
 	client.files = make(map[string]*fileInClientDir)
 	client.mu.Unlock()
+
+	go func() {
+		if err := os.RemoveAll(workingDirRenamed); err != nil {
+			logServer.Error("could not remove client working dir", "clientID", client.clientID, workingDirRenamed, err)
+		}
+	}()
 }
 
 func (client *Client) FilesCount() int64 {

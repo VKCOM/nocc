@@ -52,7 +52,7 @@ func CompileCppRemotely(daemon *Daemon, cwd string, invocation *Invocation, remo
 		return 0, nil, nil, err
 	}
 
-	logClient.Info(1, "remote", remote.remoteHostPort, "sessionID", invocation.sessionID, "waiting", len(fileIndexesToUpload), "uploads", invocation.cppInFile)
+	logClient.Info(1, "remote", remote.remoteHost, "sessionID", invocation.sessionID, "waiting", len(fileIndexesToUpload), "uploads", invocation.cppInFile)
 	logClient.Info(2, "checked", len(requiredFiles), "files whether upload is needed or they exist on remote")
 	invocation.summary.AddTiming("remote_session")
 
@@ -75,7 +75,7 @@ func CompileCppRemotely(daemon *Daemon, cwd string, invocation *Invocation, remo
 
 	// Now, we have a resulting .o file placed in a path determined by -o from command line.
 	if exitCode != 0 {
-		logClient.Info(0, "remote C++ compiler exited with code", exitCode, "sessionID", invocation.sessionID, invocation.cppInFile, remote.remoteHostPort)
+		logClient.Info(0, "remote C++ compiler exited with code", exitCode, "sessionID", invocation.sessionID, invocation.cppInFile, remote.remoteHost)
 		logClient.Info(1, "cxxExitCode:", exitCode, "sessionID", invocation.sessionID, "\ncxxStdout:", strings.TrimSpace(string(invocation.cxxStdout)), "\ncxxStderr:", strings.TrimSpace(string(invocation.cxxStderr)))
 	} else {
 		logClient.Info(2, "saved obj file to", invocation.objOutFile)

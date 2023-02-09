@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path"
 	"runtime"
 	"strconv"
 	"strings"
@@ -57,7 +58,6 @@ func (s *NoccServer) StartGRPCListening(listenAddr string) (net.Listener, error)
 		return nil, err
 	}
 
-	go s.CxxLauncher.EnterInfiniteLoopToCompile(s)
 	go s.Cron.StartCron()
 
 	logServer.Info(0, "nocc-server started")
@@ -90,7 +90,12 @@ func (s *NoccServer) StartClient(_ context.Context, in *pb.StartClientRequest) (
 		return nil, err
 	}
 
-	logServer.Info(0, "new client", "clientID", client.clientID, "user", in.HostUserName, "version", in.ClientVersion)
+	logServer.Info(0, "new client", "clientID", client.clientID, "version", in.ClientVersion, "; nClients", s.ActiveClients.ActiveCount())
+
+	if in.AllRemotesDelim != "" && s.ActiveClients.IsRemotesListSeenTheFirstTime(in.AllRemotesDelim, client.clientID) {
+		logServer.Info(0, "new remotes list", strings.Count(in.AllRemotesDelim, ",")+1, "clientID", client.clientID, in.AllRemotesDelim)
+	}
+
 	return &pb.StartClientReply{}, nil
 }
 
@@ -106,7 +111,7 @@ func (s *NoccServer) StartCompilationSession(_ context.Context, in *pb.StartComp
 		return nil, status.Errorf(codes.Unauthenticated, "clientID %s not found; probably, the server was restarted just now", in.ClientID)
 	}
 
-	session, err := client.StartNewSession(in)
+	session, err := client.CreateNewSession(in)
 	if err != nil {
 		atomic.AddInt64(&s.Stats.sessionsFailedOpen, 1)
 		logServer.Error("failed to open session", "clientID", in.ClientID, "sessionID", in.SessionID, err)
@@ -119,20 +124,30 @@ func (s *NoccServer) StartCompilationSession(_ context.Context, in *pb.StartComp
 	// respond that we are waiting 0 files, and the client would immediately request for a compiled obj
 	// it's mostly a moment of optimization: avoid calling os.Link from src cache to working dir
 	if !client.disableObjCache {
-		session.objCacheKey = s.ObjFileCache.MakeObjCacheKey(session)
-		session.objCacheExists = s.ObjFileCache.ExistsInCache(session.objCacheKey) // avoid calling ExistsInCache in the future
-		if session.objCacheExists {
-			logServer.Info(0, "started", "sessionID", session.sessionID, "clientID", client.clientID, "from obj cache", client.MapServerAbsToClientFileName(session.cppInFile))
+		session.objCacheKey = s.ObjFileCache.MakeObjCacheKey(in.CxxName, in.CxxArgs, session.files, in.CppInFile)
+		if pathInObjCache := s.ObjFileCache.LookupInCache(session.objCacheKey); len(pathInObjCache) != 0 {
+			session.objCacheExists = true
+			session.objOutFile = pathInObjCache // stream back this file directly
+			session.compilationStarted = 1      // client.GetSessionsNotStartedCompilation() will not return it
+
+			logServer.Info(0, "started", "sessionID", session.sessionID, "clientID", client.clientID, "from obj cache", in.CppInFile)
+			client.RegisterCreatedSession(session)
 			atomic.AddInt64(&s.Stats.sessionsFromObjCache, 1)
-			session.StartCompilingObjIfPossible(s) // would create a hard link from obj cache instead of launching cxx
+			session.PushToClientReadyChannel()
+
 			return &pb.StartCompilationSessionReply{}, nil
 		}
 	}
 	// otherwise, we detect files that don't exist in src cache and request a client to upload them
+	// before restoring from src cache, ensure that all client dirs structure is mirrored to workingDir
+	session.PrepareServerCxxCmdLine(s, in.Cwd, in.CxxArgs, in.CxxIDirs)
+	client.MkdirAllForSession(session)
 
-	// here we deal with concurrency: multiple nocc clients connect to this nocc server
-	// they simultaneously create sessions and want to upload files, maybe equal files
-	// our goal is to let the first client upload the file X, others will just wait if they also depend on X
+	// here we deal with concurrency:
+	// one nocc client creates multiple sessions that depend on equal h files
+	// our goal is to let the client upload file X only once:
+	// the first session is responded "need X to be uploaded", whereas other sessions just wait
+	// note, that if X is in src-cache, it's just hard linked from there to serverFileName
 	fileIndexesToUpload := make([]uint32, 0, len(session.files))
 	for index, file := range session.files {
 		switch file.state {
@@ -145,7 +160,7 @@ func (s *NoccServer) StartCompilationSession(_ context.Context, in *pb.StartComp
 				return nil, fmt.Errorf("system file %s differs between a client and a server", file.serverFileName)
 			}
 			if isSystemFile {
-				logServer.Info(2, "file", file.serverFileName, "is in src-cache, no need to upload")
+				logServer.Info(2, "file", file.serverFileName, "is a system file, no need to upload")
 				file.state = fsFileStateUploaded
 				continue
 			}
@@ -163,7 +178,7 @@ func (s *NoccServer) StartCompilationSession(_ context.Context, in *pb.StartComp
 			fileIndexesToUpload = append(fileIndexesToUpload, uint32(index))
 
 		case fsFileStateUploading:
-			if !client.IsFileUploadFailed(file) { // another client is uploading this file currently
+			if !client.IsFileUploadHanged(file) { // this file is already requested to be uploaded
 				continue
 			}
 
@@ -183,9 +198,11 @@ func (s *NoccServer) StartCompilationSession(_ context.Context, in *pb.StartComp
 		case fsFileStateUploaded:
 		}
 	}
-	logServer.Info(0, "started", "sessionID", session.sessionID, "clientID", client.clientID, "waiting", len(fileIndexesToUpload), "uploads", client.MapClientFileNameToServerAbs(session.cppInFile))
 
+	logServer.Info(0, "started", "sessionID", session.sessionID, "clientID", client.clientID, "waiting", len(fileIndexesToUpload), "uploads", in.CppInFile)
+	client.RegisterCreatedSession(session)
 	launchCxxOnServerOnReadySessions(s, client) // other sessions could also be waiting for files in src-cache
+
 	return &pb.StartCompilationSessionReply{
 		FileIndexesToUpload: fileIndexesToUpload,
 	}, nil
@@ -227,7 +244,7 @@ func (s *NoccServer) UploadFileStream(stream pb.CompilationService_UploadFileStr
 			logServer.Info(0, "start receiving large file", file.fileSize, "sessionID", session.sessionID, clientFileName)
 		}
 
-		if err := receiveUploadedFileByChunks(stream, firstChunk, int(file.fileSize), file.serverFileName); err != nil {
+		if err := receiveUploadedFileByChunks(s, stream, firstChunk, int(file.fileSize), file.serverFileName); err != nil {
 			file.state = fsFileStateUploadError
 			logServer.Error("fs uploading->error", "sessionID", session.sessionID, clientFileName, err)
 			return fmt.Errorf("can't receive file %q: %v", clientFileName, err)
@@ -252,7 +269,7 @@ func (s *NoccServer) UploadFileStream(stream pb.CompilationService_UploadFileStr
 		logServer.Info(1, "fs uploading->uploaded", "sessionID", session.sessionID, clientFileName)
 		launchCxxOnServerOnReadySessions(s, session.client) // other sessions could also be waiting for this file, we should check all
 		_ = stream.Send(&pb.UploadFileReply{})
-		_ = s.SrcFileCache.SaveFileToCache(file.serverFileName, file.fileSHA256, file.fileSize)
+		_ = s.SrcFileCache.SaveFileToCache(file.serverFileName, path.Base(file.serverFileName), file.fileSHA256, file.fileSize)
 
 		atomic.AddInt64(&s.Stats.bytesReceived, file.fileSize)
 		atomic.AddInt64(&s.Stats.filesReceived, 1)
@@ -307,7 +324,7 @@ func (s *NoccServer) RecvCompiledObjStream(in *pb.OpenReceiveStreamRequest, stre
 					return onError(session.sessionID, "can't send obj non-0 reply sessionID %d clientID %s %v", session.sessionID, client.clientID, err)
 				}
 			} else {
-				logServer.Info(2, "sending obj file", session.objOutFile, "sessionID", session.sessionID)
+				logServer.Info(0, "send obj file", "sessionID", session.sessionID, "clientID", client.clientID, "cxxDuration", session.cxxDuration, session.objOutFile)
 				bytesSent, err := sendObjFileByChunks(stream, chunkBuf, session)
 				if err != nil {
 					return onError(session.sessionID, "can't send obj file %s sessionID %d clientID %s %v", session.objOutFile, session.sessionID, client.clientID, err)
@@ -327,7 +344,7 @@ func (s *NoccServer) RecvCompiledObjStream(in *pb.OpenReceiveStreamRequest, stre
 func (s *NoccServer) StopClient(_ context.Context, in *pb.StopClientRequest) (*pb.StopClientReply, error) {
 	client := s.ActiveClients.GetClient(in.ClientID)
 	if client != nil {
-		logServer.Info(0, "client disconnected", "clientID", client.clientID)
+		logServer.Info(0, "client disconnected", "clientID", client.clientID, "; nClients", s.ActiveClients.ActiveCount()-1)
 		// removing working dir could take some time, but respond immediately
 		go s.ActiveClients.DeleteClient(client)
 	}
@@ -352,16 +369,28 @@ func (s *NoccServer) Status(context.Context, *pb.StatusRequest) (*pb.StatusReply
 
 	gccRawOut, _ := exec.Command("g++", "-v").CombinedOutput()
 	clangRawOut, _ := exec.Command("clang", "-v").CombinedOutput()
+	uNameRV, _ := exec.Command("uname", "-rv").CombinedOutput()
+
+	var rLimit syscall.Rlimit
+	_ = syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit)
 
 	return &pb.StatusReply{
-		ServerVersion: common.GetVersion(),
-		ServerArgs:    os.Args,
-		ServerUptime:  int64(time.Since(s.StartTime)),
-		GccVersion:    detectVersionFromConsoleOutput(gccRawOut),
-		ClangVersion:  detectVersionFromConsoleOutput(clangRawOut),
-		LogFileSize:   logServer.GetFileSize(),
-		SrcCacheSize:  s.SrcFileCache.GetBytesOnDisk(),
-		ObjCacheSize:  s.ObjFileCache.GetBytesOnDisk(),
+		ServerVersion:   common.GetVersion(),
+		ServerArgs:      os.Args,
+		ServerUptime:    int64(time.Since(s.StartTime)),
+		GccVersion:      detectVersionFromConsoleOutput(gccRawOut),
+		ClangVersion:    detectVersionFromConsoleOutput(clangRawOut),
+		LogFileSize:     logServer.GetFileSize(),
+		SrcCacheSize:    s.SrcFileCache.GetBytesOnDisk(),
+		ObjCacheSize:    s.ObjFileCache.GetBytesOnDisk(),
+		ULimit:          int64(rLimit.Cur),
+		UName:           strings.TrimSpace(string(uNameRV)),
+		SessionsTotal:   atomic.LoadInt64(&s.Stats.sessionsCount),
+		SessionsActive:  s.ActiveClients.ActiveSessionsCount(),
+		CxxCalls:        s.CxxLauncher.GetTotalCxxCallsCount(),
+		CxxDurMore10Sec: s.CxxLauncher.GetMore10secCount(),
+		CxxDurMore30Sec: s.CxxLauncher.GetMore30secCount(),
+		UniqueRemotes:   s.ActiveClients.GetUniqueRemotesListInfo(),
 	}, nil
 }
 

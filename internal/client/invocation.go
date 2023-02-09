@@ -143,7 +143,7 @@ func ParseCmdLineInvocation(daemon *Daemon, cwd string, cmdLine []string) (invoc
 				return
 			} else if arg == "-isysroot" {
 				// an exception for local development when "remote" is also local, but generally unsupported yet
-				if len(daemon.remoteConnections) == 1 && daemon.remoteConnections[0].remoteHostPort == "127.0.0.1:43210" {
+				if len(daemon.remoteConnections) == 1 && daemon.remoteConnections[0].remoteHost == "127.0.0.1" {
 					invocation.cxxArgs = append(invocation.cxxArgs, arg, cmdLine[i+1])
 					i++
 					continue
@@ -259,7 +259,7 @@ func (invocation *Invocation) DoneUploadFile(err error) {
 }
 
 func (invocation *Invocation) ForceInterrupt(err error) {
-	logClient.Error("force interrupt", "sessionID", invocation.sessionID, invocation.cppInFile, err)
+	logClient.Error("force interrupt", "sessionID", invocation.sessionID, "remoteHost", invocation.summary.remoteHost, invocation.cppInFile, err)
 	// release invocation.wgUpload
 	for atomic.LoadInt32(&invocation.waitUploads) != 0 {
 		invocation.DoneUploadFile(err)

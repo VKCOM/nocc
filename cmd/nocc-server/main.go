@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path"
+	"runtime"
 	"time"
 
 	"github.com/VKCOM/nocc/internal/common"
@@ -18,24 +18,29 @@ func failedStart(message string, err error) {
 	os.Exit(1)
 }
 
-// cleanupWorkingDir ensures that workingDir exists and is empty
+// prepareEmptyDir ensures that serverDir exists and is empty
 // it's executed on server launch
 // as a consequence, all file caches are lost on restart
-func cleanupWorkingDir(workingDir string) error {
-	oldWorkingDir := workingDir + ".old"
-
-	if err := os.RemoveAll(oldWorkingDir); err != nil {
-		failedStart("can't remove old working dir", err)
-	}
-	if _, err := os.Stat(workingDir); err == nil {
-		if err := os.Rename(workingDir, oldWorkingDir); err != nil {
-			failedStart("can't rename working dir %s to .old", err)
+func prepareEmptyDir(parentDir *string, subdir string) string {
+	// if /tmp/nocc/cpp/src-cache already exists, it means, that it contains files from a previous launch
+	// to start up as quickly as possible, do the following:
+	// 1) rename it to /tmp/nocc/cpp/src-cache.old
+	// 2) clear it recursively in the background
+	serverDir := *parentDir + "/" + subdir
+	if _, err := os.Stat(serverDir); err == nil {
+		oldDirRenamed := fmt.Sprintf("%s.old.%d", serverDir, time.Now().Unix())
+		if err := os.Rename(serverDir, oldDirRenamed); err != nil {
+			failedStart("can't rename "+serverDir, err)
 		}
+		go func() {
+			_ = os.RemoveAll(oldDirRenamed)
+		}()
 	}
-	if err := os.MkdirAll(workingDir, os.ModePerm); err != nil {
-		return err
+
+	if err := os.MkdirAll(serverDir, os.ModePerm); err != nil {
+		failedStart("can't create "+serverDir, err)
 	}
-	return nil
+	return serverDir
 }
 
 // printDockerContainerIP is a dev/debug function called only when build special for local Docker, for local testing.
@@ -58,8 +63,10 @@ func main() {
 		"host", "")
 	listenPort := common.CmdEnvInt("Listening port, default 43210.", 43210,
 		"port", "")
-	workingDir := common.CmdEnvString("Directory for saving incoming files, default /tmp/nocc-server.", "/tmp/nocc-server",
-		"working-dir", "")
+	cppStoreDir := common.CmdEnvString("Directory for incoming C++ files and src cache, default /tmp/nocc/cpp.\nIt can be placed in tmpfs to speed up compilation", "/tmp/nocc/cpp",
+		"cpp-dir", "")
+	objStoreDir := common.CmdEnvString("Directory for resulting obj files and obj cache, default /tmp/nocc/obj.", "/tmp/nocc/obj",
+		"obj-dir", "")
 	logFileName := common.CmdEnvString("A filename to log, by default use stderr.", "",
 		"log-filename", "")
 	logVerbosity := common.CmdEnvInt("Logger verbosity level for INFO (-1 off, default 0, max 2).\nErrors are logged always.", 0,
@@ -70,16 +77,14 @@ func main() {
 		"obj-cache-limit", "")
 	statsdHostPort := common.CmdEnvString("Statsd udp address (host:port), omitted by default.\nIf omitted, stats won't be written.", "",
 		"statsd", "")
+	maxParallelCxx := common.CmdEnvInt("Max amount of C++ compiler processes launched in parallel, other ready sessions are waiting in a queue.\nBy default, it's a number of CPUs on the current machine.", int64(runtime.NumCPU()),
+		"max-parallel-cxx", "")
 
 	common.ParseCmdFlagsCombiningWithEnv()
 
 	if *showVersionAndExit || *showVersionAndExitShort {
 		fmt.Println(common.GetVersion())
 		os.Exit(0)
-	}
-
-	if err = cleanupWorkingDir(*workingDir); err != nil {
-		failedStart("Can't create working directory "+*workingDir, err)
 	}
 
 	if err = server.MakeLoggerServer(*logFileName, *logVerbosity); err != nil {
@@ -95,12 +100,12 @@ func main() {
 		failedStart("Failed to connect to statsd", err)
 	}
 
-	s.ActiveClients, err = server.MakeClientsStorage(path.Join(*workingDir, "clients"))
+	s.ActiveClients, err = server.MakeClientsStorage(prepareEmptyDir(cppStoreDir, "clients"))
 	if err != nil {
 		failedStart("Failed to init clients hashtable", err)
 	}
 
-	s.CxxLauncher, err = server.MakeCxxLauncher()
+	s.CxxLauncher, err = server.MakeCxxLauncher(*maxParallelCxx)
 	if err != nil {
 		failedStart("Failed to init cxx launcher", err)
 	}
@@ -110,17 +115,17 @@ func main() {
 		failedStart("Failed to init system headers hashtable", err)
 	}
 
-	s.SrcFileCache, err = server.MakeSrcFileCache(path.Join(*workingDir, "src-cache"), *srcCacheLimit)
+	s.SrcFileCache, err = server.MakeSrcFileCache(prepareEmptyDir(cppStoreDir, "src-cache"), *srcCacheLimit)
 	if err != nil {
 		failedStart("Failed to init src file cache", err)
 	}
 
-	s.ObjFileCache, err = server.MakeObjFileCache(path.Join(*workingDir, "obj-cache"), *objCacheLimit)
+	s.ObjFileCache, err = server.MakeObjFileCache(prepareEmptyDir(objStoreDir, "obj-cache"), prepareEmptyDir(objStoreDir, "cxx-out"), *objCacheLimit)
 	if err != nil {
 		failedStart("Failed to init obj file cache", err)
 	}
 
-	s.PchCompilation, err = server.MakePchCompilation(path.Join(*workingDir, "pch"))
+	s.PchCompilation, err = server.MakePchCompilation(prepareEmptyDir(cppStoreDir, "pch"))
 	if err != nil {
 		failedStart("Failed to init pch compilation", err)
 	}

@@ -23,9 +23,6 @@ type Statsd struct {
 	sessionsCount          int64
 	sessionsFailedOpen     int64
 	sessionsFromObjCache   int64
-	cxxCalls               int64
-	cxxTotalDurationMs     int64
-	cxxNonZeroExitCode     int64
 	pchCompilations        int64
 	pchCompilationsFailed  int64
 
@@ -68,9 +65,13 @@ func (cs *Statsd) fillBufferWithStats(noccServer *NoccServer) {
 	cs.writeStat("clients.files_count", noccServer.ActiveClients.TotalFilesCountInDirs())
 	cs.writeStat("clients.unauthenticated", atomic.LoadInt64(&cs.clientsUnauthenticated))
 
-	cs.writeStat("cxx.calls", atomic.LoadInt64(&cs.cxxCalls))
-	cs.writeStat("cxx.duration", atomic.LoadInt64(&cs.cxxTotalDurationMs))
-	cs.writeStat("cxx.nonzero", atomic.LoadInt64(&cs.cxxNonZeroExitCode))
+	cs.writeStat("cxx.calls", noccServer.CxxLauncher.GetTotalCxxCallsCount())
+	cs.writeStat("cxx.parallel", noccServer.CxxLauncher.GetNowCompilingSessionsCount())
+	cs.writeStat("cxx.waiting", noccServer.CxxLauncher.GetWaitingInQueueSessionsCount())
+	cs.writeStat("cxx.duration", noccServer.CxxLauncher.GetTotalCxxDurationMilliseconds())
+	cs.writeStat("cxx.more10sec", noccServer.CxxLauncher.GetMore10secCount())
+	cs.writeStat("cxx.more30sec", noccServer.CxxLauncher.GetMore30secCount())
+	cs.writeStat("cxx.nonzero", noccServer.CxxLauncher.GetNonZeroExitCodeCount())
 
 	cs.writeStat("pch.calls", atomic.LoadInt64(&cs.pchCompilations))
 	cs.writeStat("pch.failed", atomic.LoadInt64(&cs.pchCompilationsFailed))
@@ -107,7 +108,10 @@ func (cs *Statsd) SendToStatsd(noccServer *NoccServer) {
 
 	cs.fillBufferWithStats(noccServer)
 
-	_, _ = io.Copy(cs.statsdConnection, &cs.statsdBuffer)
+	_, err := io.Copy(cs.statsdConnection, &cs.statsdBuffer)
+	if err != nil {
+		logServer.Error("writing to statsd", err)
+	}
 	cs.statsdBuffer.Reset()
 }
 
