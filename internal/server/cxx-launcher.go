@@ -59,7 +59,7 @@ func (cxxLauncher *CxxLauncher) launchServerCxxForCpp(session *Session, noccServ
 	}
 
 	cxxCommand := exec.Command(session.cxxName, session.cxxCmdLine...)
-	cxxCommand.Dir = session.client.workingDir
+	cxxCommand.Dir = session.cxxWorkDir
 	var cxxStdout, cxxStderr bytes.Buffer
 	cxxCommand.Stderr = &cxxStderr
 	cxxCommand.Stdout = &cxxStdout

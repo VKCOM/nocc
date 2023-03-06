@@ -27,12 +27,13 @@ type Invocation struct {
 	sessionID  uint32    // incremental while a daemon is alive
 
 	// cmdLine is parsed to the following fields:
-	cppInFile  string      // absolute path to the input file (.cpp for compilation, .h for pch generation)
-	objOutFile string      // absolute path to the output file (.o for compilation, .gch/.pch for pch generation)
-	cxxName    string      // g++ / clang / etc.
-	cxxArgs    []string    // args like -Wall, -fpch-preprocess and many more, except:
-	cxxIDirs   IncludeDirs // -I / -iquote / -isystem go here
-	depsFlags  DepCmdFlags // -MD -MF file and others, used for .d files generation (not passed to server)
+	cppInFile           string      // absolute path to the input file (.cpp for compilation, .h for pch generation)
+	originalCppInFile   string      // path to the input file as specified in client command line
+	objOutFile          string      // absolute path to the output file (.o for compilation, .gch/.pch for pch generation)
+	cxxName             string      // g++ / clang / etc.
+	cxxArgs             []string    // args like -Wall, -fpch-preprocess and many more, except:
+	cxxIDirs            IncludeDirs // -I / -iquote / -isystem go here
+	depsFlags           DepCmdFlags // -MD -MF file and others, used for .d files generation (not passed to server)
 
 	waitUploads int32 // files still waiting for upload to finish; 0 releases wgUpload; see Invocation.DoneUploadFile
 	doneRecv    int32 // 1 if o file received or failed receiving; 1 releases wgRecv; see Invocation.DoneRecvObj
@@ -191,6 +192,7 @@ func ParseCmdLineInvocation(daemon *Daemon, cwd string, cmdLine []string) (invoc
 				return
 			}
 			invocation.cppInFile = pathAbs(cwd, arg)
+			invocation.originalCppInFile = arg
 			invocation.depsFlags.SetCmdInputFile(arg)
 			continue
 		} else if strings.HasSuffix(arg, ".o") || strings.HasPrefix(arg, ".so") || strings.HasSuffix(arg, ".a") {

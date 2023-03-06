@@ -46,6 +46,7 @@ message StartCompilationSessionRequest {
     repeated string CxxArgs = 12;
     repeated string CxxIDirs = 13;
     repeated FileMetadata RequiredFiles = 14;
+    string OriginalCppInFile = 15;
 }
 
 message StartCompilationSessionReply {

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"strings"
 	"sync/atomic"
 
 	"github.com/VKCOM/nocc/internal/common"
@@ -22,6 +23,7 @@ type Session struct {
 	objOutFile string
 	cxxName    string
 	cxxCmdLine []string
+	cxxWorkDir string
 
 	client *Client
 	files  []*fileInClientDir
@@ -39,19 +41,28 @@ type Session struct {
 // PrepareServerCxxCmdLine prepares a command line for cxx invocation.
 // Notably, options like -Wall and -fpch-preprocess are pushed as is,
 // but include dirs like /home/alice/headers need to be remapped to point to server dir.
-func (session *Session) PrepareServerCxxCmdLine(cxxArgs []string, cxxIDirs []string) []string {
-	cxxCmdLine := make([]string, 0, len(cxxIDirs)+len(cxxArgs)+3)
+func (session *Session) PrepareServerCxxCmdLine(cxxArgs []string, cxxIDirs []string, originalCppInFile string) {
+	session.cxxCmdLine = make([]string, 0, len(cxxIDirs)+len(cxxArgs)+3)
 
 	// loop through -I {dir} / -include {file} / etc. (format is guaranteed), converting client {dir} to server path
 	for i := 0; i < len(cxxIDirs); i += 2 {
 		arg := cxxIDirs[i]
 		serverIdir := session.client.MapClientFileNameToServerAbs(cxxIDirs[i+1])
-		cxxCmdLine = append(cxxCmdLine, arg, serverIdir)
+		session.cxxCmdLine = append(session.cxxCmdLine, arg, serverIdir)
 	}
 	// append -Wall and other cxx args
-	cxxCmdLine = append(cxxCmdLine, cxxArgs...)
+	session.cxxCmdLine = append(session.cxxCmdLine, cxxArgs...)
+
 	// append output and input (they won't take part in obj cache key calculation, like -I)
-	return append(cxxCmdLine, "-o", session.objOutFile, session.cppInFile)
+	session.cxxCmdLine = append(session.cxxCmdLine, "-o", session.objOutFile)
+
+	if originalCppInFile != "" && strings.HasSuffix(session.cppInFile, "/" + originalCppInFile) {
+		session.cxxWorkDir = strings.TrimSuffix(session.cppInFile, "/" + originalCppInFile)
+		session.cxxCmdLine = append(session.cxxCmdLine, originalCppInFile)
+	} else {
+		session.cxxWorkDir = session.client.workingDir
+		session.cxxCmdLine = append(session.cxxCmdLine, strings.TrimPrefix(session.cppInFile, session.client.workingDir + "/"))
+	}
 }
 
 // StartCompilingObjIfPossible executes cxx if all dependent files (.cpp/.h/.nocc-pch/etc.) are ready.

@@ -97,7 +97,7 @@ func (client *Client) StartNewSession(in *pb.StartCompilationSessionRequest) (*S
 		objOutFile: cppInFile + "." + strconv.Itoa(int(rand.Int31())) + ".o",
 		client:     client,
 	}
-	newSession.cxxCmdLine = newSession.PrepareServerCxxCmdLine(in.CxxArgs, in.CxxIDirs)
+	newSession.PrepareServerCxxCmdLine(in.CxxArgs, in.CxxIDirs, in.OriginalCppInFile)
 
 	for index, meta := range in.RequiredFiles {
 		fileSHA256 := common.SHA256{B0_7: meta.SHA256_B0_7, B8_15: meta.SHA256_B8_15, B16_23: meta.SHA256_B16_23, B24_31: meta.SHA256_B24_31}
