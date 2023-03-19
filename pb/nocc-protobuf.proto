@@ -41,6 +41,7 @@ message StartClientReply {
 message StartCompilationSessionRequest {
     string ClientID = 1;
     uint32 SessionID = 2;
+    string Cwd = 3;
     string CppInFile = 10;
     string CxxName = 11;
     repeated string CxxArgs = 12;

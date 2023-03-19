@@ -2,10 +2,8 @@ package server
 
 import (
 	"fmt"
-	"math/rand"
 	"os"
 	"path"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -88,15 +86,24 @@ func (client *Client) MapServerAbsToClientFileName(serverFileName string) string
 }
 
 func (client *Client) StartNewSession(in *pb.StartCompilationSessionRequest) (*Session, error) {
-	cppInFile := client.MapClientFileNameToServerAbs(in.CppInFile)
 	newSession := &Session{
 		sessionID:  in.SessionID,
 		files:      make([]*fileInClientDir, len(in.RequiredFiles)),
 		cxxName:    in.CxxName,
-		cppInFile:  cppInFile,
-		objOutFile: cppInFile + "." + strconv.Itoa(int(rand.Int31())) + ".o",
+		cppInFile:  in.CppInFile, // as specified in a client cmd line invocation (relative to in.Cwd or abs on a client file system)
+		objOutFile: os.TempDir() + fmt.Sprintf("/%s.%d.%s.o", client.clientID, in.SessionID, path.Base(in.CppInFile)),
 		client:     client,
 	}
+
+	// old clients that don't send this field (they send abs cppInFile)
+	// todo delete later, after upgrading all clients
+	if in.Cwd == "" {
+		newSession.cxxCwd = client.workingDir
+		newSession.cppInFile = client.MapClientFileNameToServerAbs(newSession.cppInFile)
+	} else {
+		newSession.cxxCwd = client.MapClientFileNameToServerAbs(in.Cwd)
+	}
+
 	newSession.cxxCmdLine = newSession.PrepareServerCxxCmdLine(in.CxxArgs, in.CxxIDirs)
 
 	for index, meta := range in.RequiredFiles {

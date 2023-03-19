@@ -76,7 +76,7 @@ func MakeRemoteConnection(daemon *Daemon, remoteHostPort string, uploadStreamsCo
 // one `nocc` Invocation for cpp compilation == one server.Session, by design.
 // As an input, we send metadata about all dependencies needed for a .cpp to be compiled (.h/.nocc-pch/etc.).
 // As an output, the remote responds with files that are missing and needed to be uploaded.
-func (remote *RemoteConnection) StartCompilationSession(invocation *Invocation, requiredFiles []*pb.FileMetadata) ([]uint32, error) {
+func (remote *RemoteConnection) StartCompilationSession(invocation *Invocation, cwd string, requiredFiles []*pb.FileMetadata) ([]uint32, error) {
 	if remote.isUnavailable {
 		return nil, fmt.Errorf("remote %s is unavailable", remote.remoteHostPort)
 	}
@@ -86,6 +86,7 @@ func (remote *RemoteConnection) StartCompilationSession(invocation *Invocation, 
 		&pb.StartCompilationSessionRequest{
 			ClientID:      remote.clientID,
 			SessionID:     invocation.sessionID,
+			Cwd:           cwd,
 			CppInFile:     invocation.cppInFile,
 			CxxName:       invocation.cxxName,
 			CxxArgs:       invocation.cxxArgs,

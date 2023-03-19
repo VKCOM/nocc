@@ -41,7 +41,7 @@ func (file *IncludedFile) ToPbFileMetadata() *pb.FileMetadata {
 // Since cxx knows nothing about .nocc-pch files, it will output all dependencies regardless of -fpch-preprocess flag.
 // We'll manually add .nocc-pch if found, so the remote is supposed to use it, not its nested dependencies, actually.
 // See https://gcc.gnu.org/onlinedocs/gcc/Preprocessor-Options.html
-func CollectDependentIncludesByCxxM(includesCache *IncludesCache, cxxName string, cppInFile string, cxxArgs []string, cxxIDirs IncludeDirs) (hFiles []*IncludedFile, cppFile IncludedFile, err error) {
+func CollectDependentIncludesByCxxM(includesCache *IncludesCache, cwd string, cxxName string, cppInFile string, cxxArgs []string, cxxIDirs IncludeDirs) (hFiles []*IncludedFile, cppFile IncludedFile, err error) {
 	cxxCmdLine := make([]string, 0, len(cxxArgs)+2*cxxIDirs.Count()+4)
 	cxxCmdLine = append(cxxCmdLine, cxxArgs...)
 	cxxCmdLine = append(cxxCmdLine, cxxIDirs.AsCxxArgs()...)
@@ -56,6 +56,7 @@ func CollectDependentIncludesByCxxM(includesCache *IncludesCache, cxxName string
 	}
 
 	cxxMCommand := exec.Command(cxxName, cxxCmdLine...)
+	cxxMCommand.Dir = cwd
 	var cxxMStdout, cxxMStderr bytes.Buffer
 	cxxMCommand.Stdout = &cxxMStdout
 	cxxMCommand.Stderr = &cxxMStderr
