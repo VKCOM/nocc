@@ -31,11 +31,13 @@ func MakeSystemHeadersCache() (*SystemHeadersCache, error) {
 	}, nil
 }
 
-func (sHeaders *SystemHeadersCache) IsSystemHeader(headerPath string, fileSize int64, fileSHA256 common.SHA256) bool {
-	if !strings.HasPrefix(headerPath, "/usr/") && !strings.HasPrefix(headerPath, "/Library/") {
-		return false
-	}
+func IsSystemHeaderPath(somePathOrFileName string) bool {
+	return strings.HasPrefix(somePathOrFileName, "/usr/local/") ||
+		strings.HasPrefix(somePathOrFileName, "/usr/src/") ||
+		strings.HasPrefix(somePathOrFileName, "/Library/")
+}
 
+func (sHeaders *SystemHeadersCache) IsSystemHeader(headerPath string, fileSize int64, fileSHA256 common.SHA256) bool {
 	sHeaders.mu.RLock()
 	header, exists := sHeaders.headers[headerPath]
 	sHeaders.mu.RUnlock()

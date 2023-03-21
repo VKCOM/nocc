@@ -68,12 +68,17 @@ func Test_compileCMakeProject1(t *testing.T) {
 }
 
 func Test_compileCppFileInUsrLocal(t *testing.T) {
+	// this test supposes you have the following files:
+	// * /usr/local/nocc-test.cpp    			, it does #include "nocc-test.h"
+	// * /usr/local/nocc-test/nocc-test.h
+	// here we test, that besides these files aren't uploaded (and aren't saved to /tmp/.../usr/local/),
+	// they still compile correctly and -I option points to a system path, not to a non-existing tmp path
 	if _, err := os.Stat("/usr/local/nocc-test.cpp"); err != nil {
 		t.Skip("/usr/local/nocc-test.cpp doesn't exist")
 		return
 	}
 
-	var cmdLineStr = "g++ -c /usr/local/nocc-test.cpp -o /tmp/usr-local-nocc-test.o"
+	var cmdLineStr = "g++ -c /usr/local/nocc-test.cpp -I/usr/local/nocc-test/ -o /tmp/usr-local-nocc-test.o"
 	exitCode, stdout, stderr, err := createClientAndEmulateDaemonForTesting(cmdLineStr)
 	if err != nil {
 		t.Errorf("Error initing nocc client %s", err)

@@ -72,8 +72,13 @@ func (client *Client) makeNewFile(clientFileName string, fileSize int64, fileSHA
 
 // MapClientFileNameToServerAbs converts a client file name to an absolute path on server.
 // For example, /proj/1.cpp maps to /tmp/nocc-server/clients/{clientID}/proj/1.cpp.
+// Note, that system files like /usr/local/include are required to be equal on both sides.
+// (if not, a server session will fail to start, and a client will fall back to local compilation)
 func (client *Client) MapClientFileNameToServerAbs(clientFileName string) string {
 	if clientFileName[0] == '/' {
+		if IsSystemHeaderPath(clientFileName) {
+			return clientFileName
+		}
 		return client.workingDir + clientFileName
 	}
 	return path.Join(client.workingDir, clientFileName)
@@ -81,6 +86,7 @@ func (client *Client) MapClientFileNameToServerAbs(clientFileName string) string
 
 // MapServerAbsToClientFileName converts an absolute path on server relatively to the client working dir.
 // For example, /tmp/nocc-server/clients/{clientID}/proj/1.cpp maps to /proj/1.cpp.
+// If serverFileName is /usr/local/include, it's left as is.
 func (client *Client) MapServerAbsToClientFileName(serverFileName string) string {
 	return strings.TrimPrefix(serverFileName, client.workingDir)
 }
