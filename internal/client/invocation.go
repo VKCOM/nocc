@@ -27,8 +27,8 @@ type Invocation struct {
 	sessionID  uint32    // incremental while a daemon is alive
 
 	// cmdLine is parsed to the following fields:
-	cppInFile  string      // absolute path to the input file (.cpp for compilation, .h for pch generation)
-	objOutFile string      // absolute path to the output file (.o for compilation, .gch/.pch for pch generation)
+	cppInFile  string      // input file as specified in cmd line (.cpp for compilation, .h for pch generation)
+	objOutFile string      // output file as specified in cmd line (.o for compilation, .gch/.pch for pch generation)
 	cxxName    string      // g++ / clang / etc.
 	cxxArgs    []string    // args like -Wall, -fpch-preprocess and many more, except:
 	cxxIDirs   IncludeDirs // -I / -iquote / -isystem go here
@@ -89,13 +89,13 @@ func ParseCmdLineInvocation(daemon *Daemon, cwd string, cmdLine []string) (invoc
 				if cmdLine[*argIndex] == "-Xclang" { // -Xclang -include -Xclang {file}
 					*argIndex++
 				}
-				return pathAbs(cwd, cmdLine[*argIndex]), true
+				return cmdLine[*argIndex], true
 			} else {
 				invocation.err = fmt.Errorf("unsupported command-line: no argument after %s", arg)
 				return "", false
 			}
 		} else if strings.HasPrefix(arg, key) { // -I/path
-			return pathAbs(cwd, arg[len(key):]), true
+			return arg[len(key):], true
 		}
 		return "", false
 	}
@@ -121,19 +121,18 @@ func ParseCmdLineInvocation(daemon *Daemon, cwd string, cmdLine []string) (invoc
 		if arg[0] == '-' {
 			if oFile, ok := parseArgFile("-o", arg, &i); ok {
 				invocation.objOutFile = oFile
-				invocation.depsFlags.SetCmdOutputFile(strings.TrimPrefix(arg, "-o"))
 				continue
 			} else if dir, ok := parseArgFile("-I", arg, &i); ok {
-				invocation.cxxIDirs.dirsI = append(invocation.cxxIDirs.dirsI, dir)
+				invocation.cxxIDirs.dirsI = append(invocation.cxxIDirs.dirsI, pathAbs(cwd, dir))
 				continue
 			} else if dir, ok := parseArgFile("-iquote", arg, &i); ok {
-				invocation.cxxIDirs.dirsIquote = append(invocation.cxxIDirs.dirsIquote, dir)
+				invocation.cxxIDirs.dirsIquote = append(invocation.cxxIDirs.dirsIquote, pathAbs(cwd, dir))
 				continue
 			} else if dir, ok := parseArgFile("-isystem", arg, &i); ok {
-				invocation.cxxIDirs.dirsIsystem = append(invocation.cxxIDirs.dirsIsystem, dir)
+				invocation.cxxIDirs.dirsIsystem = append(invocation.cxxIDirs.dirsIsystem, pathAbs(cwd, dir))
 				continue
 			} else if iFile, ok := parseArgFile("-include", arg, &i); ok {
-				invocation.cxxIDirs.filesI = append(invocation.cxxIDirs.filesI, iFile)
+				invocation.cxxIDirs.filesI = append(invocation.cxxIDirs.filesI, pathAbs(cwd, iFile))
 				continue
 			} else if arg == "-march=native" {
 				invocation.err = fmt.Errorf("-march=native can't be launched remotely")
@@ -190,8 +189,7 @@ func ParseCmdLineInvocation(daemon *Daemon, cwd string, cmdLine []string) (invoc
 				invocation.err = fmt.Errorf("unsupported command-line: multiple input source files")
 				return
 			}
-			invocation.cppInFile = pathAbs(cwd, arg)
-			invocation.depsFlags.SetCmdInputFile(arg)
+			invocation.cppInFile = arg
 			continue
 		} else if strings.HasSuffix(arg, ".o") || strings.HasPrefix(arg, ".so") || strings.HasSuffix(arg, ".a") {
 			invocation.invokeType = invokedForLinking
@@ -221,15 +219,26 @@ func ParseCmdLineInvocation(daemon *Daemon, cwd string, cmdLine []string) (invoc
 // There are two modes of finding dependencies:
 // 1. Natively: invoke "cxx -M" (it invokes preprocessor only).
 // 2. Own includes parser, which works much faster and theoretically should return the same (or a bit more) results.
-func (invocation *Invocation) CollectDependentIncludes(disableOwnIncludes bool) (hFiles []*IncludedFile, cppFile IncludedFile, err error) {
+func (invocation *Invocation) CollectDependentIncludes(cwd string, disableOwnIncludes bool) (hFiles []*IncludedFile, cppFile IncludedFile, err error) {
+	cppInFileAbs := invocation.GetCppInFileAbs(cwd)
+
 	if disableOwnIncludes {
-		return CollectDependentIncludesByCxxM(invocation.includesCache, invocation.cxxName, invocation.cppInFile, invocation.cxxArgs, invocation.cxxIDirs)
+		return CollectDependentIncludesByCxxM(invocation.includesCache, cwd, invocation.cxxName, cppInFileAbs, invocation.cxxArgs, invocation.cxxIDirs)
 	}
 
 	includeDirs := invocation.cxxIDirs
 	includeDirs.MergeWith(invocation.includesCache.cxxDefIDirs)
 
-	return CollectDependentIncludesByOwnParser(invocation.includesCache, invocation.cppInFile, includeDirs)
+	return CollectDependentIncludesByOwnParser(invocation.includesCache, cppInFileAbs, includeDirs)
+}
+
+// GetCppInFileAbs returns an absolute path to invocation.cppInFile.
+// (remember, that it's stored as-is from cmd line)
+func (invocation *Invocation) GetCppInFileAbs(cwd string) string {
+	if invocation.cppInFile[0] == '/' {
+		return invocation.cppInFile
+	}
+	return cwd + "/" + invocation.cppInFile
 }
 
 func (invocation *Invocation) DoneRecvObj(err error) {

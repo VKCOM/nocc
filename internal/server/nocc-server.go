@@ -140,15 +140,17 @@ func (s *NoccServer) StartCompilationSession(_ context.Context, in *pb.StartComp
 			file.state = fsFileStateUploading
 			file.uploadStartTime = time.Now()
 
-			clientFileName := client.MapServerAbsToClientFileName(file.serverFileName)
-			if s.SystemHeaders.IsSystemHeader(clientFileName, file.fileSize, file.fileSHA256) {
-				logServer.Info(2, "file", clientFileName, "is a system header, no need to upload")
+			isSystemFile := IsSystemHeaderPath(file.serverFileName) // inside /usr/local/include
+			if isSystemFile && !s.SystemHeaders.IsSystemHeader(file.serverFileName, file.fileSize, file.fileSHA256) {
+				return nil, fmt.Errorf("system file %s differs between a client and a server", file.serverFileName)
+			}
+			if isSystemFile {
+				logServer.Info(2, "file", file.serverFileName, "is in src-cache, no need to upload")
 				file.state = fsFileStateUploaded
-				file.serverFileName = clientFileName // "/usr/include/..." — the same system header as on client
 				continue
 			}
 			if s.SrcFileCache.CreateHardLinkFromCache(file.serverFileName, file.fileSHA256) {
-				logServer.Info(2, "file", clientFileName, "is in src-cache, no need to upload")
+				logServer.Info(2, "file", file.serverFileName, "is in src-cache, no need to upload")
 				file.state = fsFileStateUploaded
 
 				if strings.HasSuffix(file.serverFileName, ".nocc-pch") {

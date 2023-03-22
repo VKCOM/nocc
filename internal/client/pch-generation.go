@@ -10,7 +10,7 @@ import (
 // When we need to generate .gch/.pch on a client side, we generate .nocc-pch INSTEAD.
 // This file is later discovered as a dependency, and after being uploaded, is compiled to real .gch/.pch on remote.
 // See comments above common.OwnPch.
-func GenerateOwnPch(daemon *Daemon, invocation *Invocation) (*common.OwnPch, error) {
+func GenerateOwnPch(daemon *Daemon, cwd string, invocation *Invocation) (*common.OwnPch, error) {
 	ownPch := &common.OwnPch{
 		OwnPchFile:  common.ReplaceFileExt(invocation.objOutFile, ".nocc-pch"),
 		OrigHFile:   invocation.cppInFile,
@@ -21,7 +21,7 @@ func GenerateOwnPch(daemon *Daemon, invocation *Invocation) (*common.OwnPch, err
 	}
 	_ = os.Remove(ownPch.OwnPchFile) // if a previous version exists
 
-	hFiles, inHFile, err := invocation.CollectDependentIncludes(daemon.disableOwnIncludes)
+	hFiles, inHFile, err := invocation.CollectDependentIncludes(cwd, daemon.disableOwnIncludes)
 	if err != nil {
 		return nil, err
 	}

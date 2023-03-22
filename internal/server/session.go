@@ -20,6 +20,7 @@ type Session struct {
 
 	cppInFile  string
 	objOutFile string
+	cxxCwd     string
 	cxxName    string
 	cxxCmdLine []string
 

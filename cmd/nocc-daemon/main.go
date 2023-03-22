@@ -154,7 +154,7 @@ func main() {
 		failedStart("no remote hosts set; you should set NOCC_SERVERS or NOCC_SERVERS_FILENAME")
 	}
 
-	exitCode, stdout, stderr := client.EmulateDaemonInsideThisProcessForDev(remoteNoccHosts, os.Args[1:], *disableOwnIncludes)
+	exitCode, stdout, stderr := client.EmulateDaemonInsideThisProcessForDev(remoteNoccHosts, os.Args[1:], *disableOwnIncludes, 1)
 	_, _ = os.Stdout.Write(stdout)
 	_, _ = os.Stderr.Write(stderr)
 	os.Exit(exitCode)

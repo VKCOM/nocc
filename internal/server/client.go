@@ -2,10 +2,8 @@ package server
 
 import (
 	"fmt"
-	"math/rand"
 	"os"
 	"path"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -74,8 +72,13 @@ func (client *Client) makeNewFile(clientFileName string, fileSize int64, fileSHA
 
 // MapClientFileNameToServerAbs converts a client file name to an absolute path on server.
 // For example, /proj/1.cpp maps to /tmp/nocc-server/clients/{clientID}/proj/1.cpp.
+// Note, that system files like /usr/local/include are required to be equal on both sides.
+// (if not, a server session will fail to start, and a client will fall back to local compilation)
 func (client *Client) MapClientFileNameToServerAbs(clientFileName string) string {
 	if clientFileName[0] == '/' {
+		if IsSystemHeaderPath(clientFileName) {
+			return clientFileName
+		}
 		return client.workingDir + clientFileName
 	}
 	return path.Join(client.workingDir, clientFileName)
@@ -83,20 +86,30 @@ func (client *Client) MapClientFileNameToServerAbs(clientFileName string) string
 
 // MapServerAbsToClientFileName converts an absolute path on server relatively to the client working dir.
 // For example, /tmp/nocc-server/clients/{clientID}/proj/1.cpp maps to /proj/1.cpp.
+// If serverFileName is /usr/local/include, it's left as is.
 func (client *Client) MapServerAbsToClientFileName(serverFileName string) string {
 	return strings.TrimPrefix(serverFileName, client.workingDir)
 }
 
 func (client *Client) StartNewSession(in *pb.StartCompilationSessionRequest) (*Session, error) {
-	cppInFile := client.MapClientFileNameToServerAbs(in.CppInFile)
 	newSession := &Session{
 		sessionID:  in.SessionID,
 		files:      make([]*fileInClientDir, len(in.RequiredFiles)),
 		cxxName:    in.CxxName,
-		cppInFile:  cppInFile,
-		objOutFile: cppInFile + "." + strconv.Itoa(int(rand.Int31())) + ".o",
+		cppInFile:  in.CppInFile, // as specified in a client cmd line invocation (relative to in.Cwd or abs on a client file system)
+		objOutFile: os.TempDir() + fmt.Sprintf("/%s.%d.%s.o", client.clientID, in.SessionID, path.Base(in.CppInFile)),
 		client:     client,
 	}
+
+	// old clients that don't send this field (they send abs cppInFile)
+	// todo delete later, after upgrading all clients
+	if in.Cwd == "" {
+		newSession.cxxCwd = client.workingDir
+		newSession.cppInFile = client.MapClientFileNameToServerAbs(newSession.cppInFile)
+	} else {
+		newSession.cxxCwd = client.MapClientFileNameToServerAbs(in.Cwd)
+	}
+
 	newSession.cxxCmdLine = newSession.PrepareServerCxxCmdLine(in.CxxArgs, in.CxxIDirs)
 
 	for index, meta := range in.RequiredFiles {

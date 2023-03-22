@@ -41,6 +41,7 @@ type Daemon struct {
 
 	disableObjCache    bool
 	disableOwnIncludes bool
+	disableLocalCxx    bool
 
 	totalInvocations  uint32
 	activeInvocations map[uint32]*Invocation
@@ -88,6 +89,7 @@ func MakeDaemon(remoteNoccHosts []string, disableObjCache bool, disableOwnInclud
 		localCxxThrottle:   make(chan struct{}, localCxxQueueSize),
 		disableOwnIncludes: disableOwnIncludes,
 		disableObjCache:    disableObjCache,
+		disableLocalCxx:    localCxxQueueSize == 0,
 		activeInvocations:  make(map[uint32]*Invocation, 300),
 		includesCache:      make(map[string]*IncludesCache, 1),
 	}
@@ -171,7 +173,7 @@ func (daemon *Daemon) HandleInvocation(req DaemonSockRequest) DaemonSockResponse
 
 	case invokedForCompilingPch:
 		invocation.includesCache.Clear()
-		ownPch, err := GenerateOwnPch(daemon, invocation)
+		ownPch, err := GenerateOwnPch(daemon, req.Cwd, invocation)
 		if err != nil {
 			return daemon.FallbackToLocalCxx(req, fmt.Errorf("failed to generate pch file: %v", err))
 		}
@@ -212,7 +214,7 @@ func (daemon *Daemon) HandleInvocation(req DaemonSockRequest) DaemonSockResponse
 
 		var err error
 		var reply DaemonSockResponse
-		reply.ExitCode, reply.Stdout, reply.Stderr, err = CompileCppRemotely(daemon, invocation, remote)
+		reply.ExitCode, reply.Stdout, reply.Stderr, err = CompileCppRemotely(daemon, req.Cwd, invocation, remote)
 
 		daemon.mu.Lock()
 		delete(daemon.activeInvocations, invocation.sessionID)
@@ -233,6 +235,11 @@ func (daemon *Daemon) FallbackToLocalCxx(req DaemonSockRequest, reason error) Da
 	}
 
 	var reply DaemonSockResponse
+	if daemon.disableLocalCxx {
+		reply.ExitCode = 1
+		reply.Stderr = []byte("fallback to local cxx disabled")
+		return reply
+	}
 
 	daemon.localCxxThrottle <- struct{}{}
 	localCxx := LocalCxxLaunch{req.CmdLine, req.Cwd}

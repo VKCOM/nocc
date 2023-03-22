@@ -27,9 +27,6 @@ type DepCmdFlags struct {
 	flagMD  bool   // -MD (like -MF {def file})
 	flagMMD bool   // -MMD (mention only user header files, not system header files)
 	flagMP  bool   // -MP (add a phony target for each dependency other than the main file)
-
-	origO   string // if -MT not set, -o used as a target name (not resolved objOutFile, but as-is from cmdLine)
-	origCpp string // a first dependency is an input cpp file, but again, as-is, not resolved cppInFile
 }
 
 func (deps *DepCmdFlags) SetCmdFlagMF(absFilename string) {
@@ -62,14 +59,6 @@ func (deps *DepCmdFlags) SetCmdFlagMP() {
 	deps.flagMP = true
 }
 
-func (deps *DepCmdFlags) SetCmdOutputFile(origO string) {
-	deps.origO = origO
-}
-
-func (deps *DepCmdFlags) SetCmdInputFile(origCpp string) {
-	deps.origCpp = origCpp
-}
-
 // ShouldGenerateDepFile determines whether to output .o.d file besides .o compilation
 func (deps *DepCmdFlags) ShouldGenerateDepFile() bool {
 	return deps.flagMD || deps.flagMF != ""
@@ -81,7 +70,7 @@ func (deps *DepCmdFlags) ShouldGenerateDepFile() bool {
 func (deps *DepCmdFlags) GenerateAndSaveDepFile(invocation *Invocation, hFiles []*IncludedFile) (string, error) {
 	targetName := deps.flagMT
 	if len(targetName) == 0 {
-		targetName = deps.calcDefaultTargetName()
+		targetName = deps.calcDefaultTargetName(invocation)
 	}
 
 	depFileName := deps.calcOutputDepFileName(invocation)
@@ -94,7 +83,7 @@ func (deps *DepCmdFlags) GenerateAndSaveDepFile(invocation *Invocation, hFiles [
 		// > This option instructs CPP to add a phony target for each dependency other than the main file,
 		// > causing each to depend on nothing.
 		for idx, depStr := range depListMainTarget {
-			if idx > 0 { // 0 is origCpp
+			if idx > 0 { // 0 is cppInFile
 				depTargets = append(depTargets, DepFileTarget{escapeMakefileSpaces(depStr), nil})
 			}
 		}
@@ -108,9 +97,10 @@ func (deps *DepCmdFlags) GenerateAndSaveDepFile(invocation *Invocation, hFiles [
 }
 
 // calcDefaultTargetName returns targetName if no -MT and similar options passed
-func (deps *DepCmdFlags) calcDefaultTargetName() string {
+func (deps *DepCmdFlags) calcDefaultTargetName(invocation *Invocation) string {
 	// g++ documentation doesn't satisfy its actual behavior, the implementation seems to be just
-	return deps.origO
+	// (remember, that objOutFile is not a full path, it's a relative as specified in cmd line)
+	return invocation.objOutFile
 }
 
 // calcOutputDepFileName returns a name of generated .o.d file based on cmd flags
@@ -145,7 +135,7 @@ func (deps *DepCmdFlags) calcDepListFromHFiles(invocation *Invocation, hFiles []
 	}
 
 	depList := make([]string, 0, 1+len(hFiles))
-	depList = append(depList, quoteMakefileTarget(deps.origCpp))
+	depList = append(depList, quoteMakefileTarget(invocation.cppInFile))
 	for _, hFile := range hFiles {
 		depList = append(depList, relFileName(hFile.fileName))
 	}

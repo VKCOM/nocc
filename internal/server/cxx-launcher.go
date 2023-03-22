@@ -9,8 +9,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
-
-	"github.com/VKCOM/nocc/internal/common"
 )
 
 type CxxLauncher struct {
@@ -29,37 +27,15 @@ func (cxxLauncher *CxxLauncher) EnterInfiniteLoopToCompile(noccServer *NoccServe
 	}
 }
 
-// symlinkSystemFilesToClientWorkingDir deals with the following situation.
-// If session.cppInFile doesn't exist on a server, it means the following: an input file is in /usr,
-// which is equal on a server and on a client, and it just hasn't been uploaded.
-// In that case, cppInFile = /tmp/.../usr/..., clientFileName = /usr/..., cxxArgs contain -I /tmp/.../usr/...
-// To make compilation succeed in workingDir, symlink all dependencies from a system folder into workingDir.
-// Note, that we use symlinks, because we have no permissions on hardlinks for that locations.
-func (cxxLauncher *CxxLauncher) symlinkSystemFilesToClientWorkingDir(session *Session, systemHeaders *SystemHeadersCache) {
-	for _, file := range session.files {
-		// for system headers, file.serverFileName is /usr/..., not /tmp/...
-		if systemHeaders.IsSystemHeader(file.serverFileName, file.fileSize, file.fileSHA256) {
-			clientFileName := file.serverFileName
-			serverFileName := session.client.MapClientFileNameToServerAbs(clientFileName)
-
-			logServer.Info(2, "symlink", clientFileName, "to", serverFileName)
-			_ = common.MkdirForFile(serverFileName)
-			if err := os.Symlink(clientFileName, serverFileName); err != nil && !os.IsExist(err) {
-				logServer.Error("symlink from", clientFileName, "failed", err)
-			}
-		}
-	}
-}
-
 func (cxxLauncher *CxxLauncher) launchServerCxxForCpp(session *Session, noccServer *NoccServer) {
-	// read a comment above symlinkSystemFilesToClientWorkingDir()
-	if _, err := os.Stat(session.cppInFile); os.IsNotExist(err) {
-		logServer.Info(1, "not found cpp", session.cppInFile, ", symlink system files to", session.client.workingDir)
-		cxxLauncher.symlinkSystemFilesToClientWorkingDir(session, noccServer.SystemHeaders)
+	if _, err := os.Stat(session.cxxCwd); os.IsNotExist(err) {
+		// {clientWorkingDir}/{clientCwd} may not exist if it doesn't contain source files (they weren't uploaded)
+		// it's okay, because session.cppInFile may look like "../outer.cpp" or "/usr/local/some.cpp"
+		_ = os.MkdirAll(session.cxxCwd, os.ModePerm)
 	}
 
 	cxxCommand := exec.Command(session.cxxName, session.cxxCmdLine...)
-	cxxCommand.Dir = session.client.workingDir
+	cxxCommand.Dir = session.cxxCwd
 	var cxxStdout, cxxStderr bytes.Buffer
 	cxxCommand.Stderr = &cxxStderr
 	cxxCommand.Stdout = &cxxStdout
@@ -78,7 +54,7 @@ func (cxxLauncher *CxxLauncher) launchServerCxxForCpp(session *Session, noccServ
 
 	if session.cxxExitCode != 0 {
 		atomic.AddInt64(&noccServer.Stats.cxxNonZeroExitCode, 1)
-		logServer.Error("the C++ compiler exited with code", session.cxxExitCode, "sessionID", session.sessionID, session.cppInFile, "\ncxxCmdLine:", session.cxxName, session.cxxCmdLine, "\ncxxStdout:", strings.TrimSpace(string(session.cxxStdout)), "\ncxxStderr:", strings.TrimSpace(string(session.cxxStderr)))
+		logServer.Error("the C++ compiler exited with code", session.cxxExitCode, "sessionID", session.sessionID, session.cppInFile, "\ncxxCwd:", session.cxxCwd, "\ncxxCmdLine:", session.cxxName, session.cxxCmdLine, "\ncxxStdout:", strings.TrimSpace(string(session.cxxStdout)), "\ncxxStderr:", strings.TrimSpace(string(session.cxxStderr)))
 	}
 
 	// save to obj cache (to be safe, only if cxx output is empty)
