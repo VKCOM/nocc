@@ -83,7 +83,7 @@ func (deps *DepCmdFlags) GenerateAndSaveDepFile(invocation *Invocation, hFiles [
 		// > This option instructs CPP to add a phony target for each dependency other than the main file,
 		// > causing each to depend on nothing.
 		for idx, depStr := range depListMainTarget {
-			if idx > 0 { // 0 is origCpp
+			if idx > 0 { // 0 is cppInFile
 				depTargets = append(depTargets, DepFileTarget{escapeMakefileSpaces(depStr), nil})
 			}
 		}

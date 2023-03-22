@@ -77,7 +77,7 @@ func detectHostUserName() string {
 	return curUser.Username
 }
 
-func MakeDaemon(remoteNoccHosts []string, disableObjCache bool, disableOwnIncludes bool, disableLocalCxx bool, localCxxQueueSize int64) (*Daemon, error) {
+func MakeDaemon(remoteNoccHosts []string, disableObjCache bool, disableOwnIncludes bool, localCxxQueueSize int64) (*Daemon, error) {
 	// env NOCC_SERVERS and others are supposed to be the same between `nocc` invocations
 	// (in practice, this is true, as the first `nocc` invocation has no precedence over any other in a bunch)
 	daemon := &Daemon{
@@ -89,7 +89,7 @@ func MakeDaemon(remoteNoccHosts []string, disableObjCache bool, disableOwnInclud
 		localCxxThrottle:   make(chan struct{}, localCxxQueueSize),
 		disableOwnIncludes: disableOwnIncludes,
 		disableObjCache:    disableObjCache,
-		disableLocalCxx:    disableLocalCxx,
+		disableLocalCxx:    localCxxQueueSize == 0,
 		activeInvocations:  make(map[uint32]*Invocation, 300),
 		includesCache:      make(map[string]*IncludesCache, 1),
 	}
