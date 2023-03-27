@@ -1,0 +1,25 @@
+name: Tests
+
+on:
+  pull_request:
+
+jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Fetch Sources
+        uses: actions/checkout@v3
+
+      - name: Install GO
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.16'
+
+      - name: Prepare tests
+        run: ./bootstrap.sh
+
+      - name: Execute linter
+        run: make lint
