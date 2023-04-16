@@ -54,10 +54,10 @@ func (cxxLauncher *CxxLauncher) LaunchCxxWhenPossible(noccServer *NoccServer, se
 
 	if session.cxxExitCode != 0 {
 		atomic.AddInt64(&cxxLauncher.nonZeroExitCodeCount, 1)
-	} else if session.cxxDuration > 10000 {
-		atomic.AddInt64(&cxxLauncher.more10secCount, 1)
 	} else if session.cxxDuration > 30000 {
 		atomic.AddInt64(&cxxLauncher.more30secCount, 1)
+	} else if session.cxxDuration > 10000 {
+		atomic.AddInt64(&cxxLauncher.more10secCount, 1)
 	}
 
 	<-cxxLauncher.serverCxxThrottle

@@ -43,13 +43,23 @@ type Session struct {
 func (session *Session) PrepareServerCxxCmdLine(noccServer *NoccServer, clientCwd string, cxxArgs []string, cxxIDirs []string) {
 	session.objOutFile = noccServer.ObjFileCache.GenerateObjOutFileName(session)
 
+	var cppInFile string
 	// old clients that don't send this field (they send abs cppInFile)
 	// todo delete later, after upgrading all clients
 	if clientCwd == "" {
-		session.cppInFile = session.client.MapClientFileNameToServerAbs(session.cppInFile)
+		cppInFile = session.client.MapClientFileNameToServerAbs(session.cppInFile)
 		session.cxxCwd = session.client.workingDir
 	} else {
-		// session.cppInFile is relative to clientCwd: as-is from a client command line
+		// session.cppInFile is as-is from a client cmd line:
+		// * "/abs/path" becomes "client.workingDir/abs/path"
+		//    (except for system files, /usr/include left unchanged)
+		// * "rel/path" (relative to clientCwd) is left as-is (becomes relative to session.cxxCwd)
+		//    (for correct __FILE__ expansion and other minor specifics)
+		if session.cppInFile[0] == '/' {
+			cppInFile = session.client.MapClientFileNameToServerAbs(session.cppInFile)
+		} else {
+			cppInFile = session.cppInFile
+		}
 		session.cxxCwd = session.client.MapClientFileNameToServerAbs(clientCwd)
 	}
 
@@ -64,7 +74,7 @@ func (session *Session) PrepareServerCxxCmdLine(noccServer *NoccServer, clientCw
 	// append -Wall and other cxx args
 	cxxCmdLine = append(cxxCmdLine, cxxArgs...)
 	// build final string
-	session.cxxCmdLine = append(cxxCmdLine, "-o", session.objOutFile, session.cppInFile)
+	session.cxxCmdLine = append(cxxCmdLine, "-o", session.objOutFile, cppInFile)
 }
 
 // StartCompilingObjIfPossible executes cxx if all dependent files (.cpp/.h/.nocc-pch/etc.) are ready.
