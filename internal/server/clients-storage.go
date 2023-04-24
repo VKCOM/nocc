@@ -53,13 +53,9 @@ func (allClients *ClientsStorage) OnClientConnected(clientID string, disableObjC
 		allClients.DeleteClient(client)
 	}
 
-	var tmpStart = time.Now()
 	workingDir := path.Join(allClients.clientsDir, clientID)
 	if err := os.Mkdir(workingDir, os.ModePerm); err != nil {
 		return nil, fmt.Errorf("can't create client working directory: %v", err)
-	}
-	if time.Since(tmpStart) > 10*time.Millisecond {
-		logServer.TmpDebug("too long empty Mkdir", "clientID", clientID, time.Since(tmpStart))
 	}
 
 	client = &Client{

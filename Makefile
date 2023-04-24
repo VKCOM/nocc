@@ -1,4 +1,4 @@
-RELEASE = v1.1.8
+RELEASE = v1.2
 BUILD_COMMIT := $(shell git rev-parse --short HEAD)
 DATE := $(shell date -u '+%F %X UTC')
 VERSION := ${RELEASE}, rev ${BUILD_COMMIT}, compiled at ${DATE}
