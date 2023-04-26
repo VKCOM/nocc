@@ -69,8 +69,6 @@ func main() {
 		"", "NOCC_LOG_FILENAME")
 	logVerbosity := common.CmdEnvInt("Logger verbosity level for INFO (-1 off, default 0, max 2).\nErrors are logged always.", 0,
 		"", "NOCC_LOG_VERBOSITY")
-	connectTimeout := common.CmdEnvInt("Timeout, in milliseconds, to connect to servers at start up (default 3000).\nIf any server is unreachable, all invocations pointing to that server fall back to local compilation.", 3000,
-		"", "NOCC_CONNECT_TIMEOUT")
 	disableObjCache := common.CmdEnvBool("Disable obj cache on remote: .o will be compiled always and won't be stored.", false,
 		"", "NOCC_DISABLE_OBJ_CACHE")
 	disableOwnIncludes := common.CmdEnvBool("Disable own includes parser: use a C++ preprocessor instead.\nIt's much slower, but 100% works.\nBy default, nocc traverses #include-s recursively using its own built-in parser.", false,
@@ -130,7 +128,7 @@ func main() {
 			failedStartDaemon(err)
 		}
 
-		daemon, err := client.MakeDaemon(remoteNoccHosts, *disableObjCache, *disableOwnIncludes, *localCxxQueueSize, *connectTimeout)
+		daemon, err := client.MakeDaemon(remoteNoccHosts, *disableObjCache, *disableOwnIncludes, *localCxxQueueSize)
 		if err != nil {
 			failedStartDaemon(err)
 		}
