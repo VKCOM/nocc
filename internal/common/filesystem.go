@@ -1,9 +1,11 @@
 package common
 
 import (
+	"math/rand"
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 )
 
 func MkdirForFile(fileName string) error {
@@ -13,14 +15,9 @@ func MkdirForFile(fileName string) error {
 	return nil
 }
 
-func OpenTempFile(fullPath string, mkdir bool) (f *os.File, err error) {
-	directory, fileName := filepath.Split(fullPath)
-	if mkdir {
-		if err := os.MkdirAll(directory, os.ModePerm); err != nil {
-			return nil, err
-		}
-	}
-	return os.CreateTemp(directory, fileName)
+func OpenTempFile(fullPath string) (f *os.File, err error) {
+	fileNameTmp := fullPath + "." + strconv.Itoa(rand.Int())
+	return os.OpenFile(fileNameTmp, os.O_RDWR|os.O_CREATE|os.O_EXCL, os.ModePerm)
 }
 
 func ReplaceFileExt(fileName string, newExt string) string {

@@ -3,7 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
-	"time"
+	"strings"
 
 	"github.com/VKCOM/nocc/internal/common"
 	"github.com/VKCOM/nocc/pb"
@@ -16,6 +16,7 @@ import (
 // then all invocations that should be sent to that remote are executed locally within a daemon.
 type RemoteConnection struct {
 	remoteHostPort string
+	remoteHost     string // for console output and logs, just IP is more pretty
 	isUnavailable  bool
 
 	grpcClient     *GRPCClient
@@ -27,11 +28,20 @@ type RemoteConnection struct {
 	disableObjCache bool
 }
 
-func MakeRemoteConnection(daemon *Daemon, remoteHostPort string, uploadStreamsCount int64, receiveStreamsCount int64) (*RemoteConnection, error) {
+func ExtractRemoteHostWithoutPort(remoteHostPort string) (remoteHost string) {
+	remoteHost = remoteHostPort
+	if idx := strings.Index(remoteHostPort, ":"); idx != -1 {
+		remoteHost = remoteHostPort[:idx]
+	}
+	return
+}
+
+func MakeRemoteConnection(daemon *Daemon, remoteHostPort string, ctxWithTimeout context.Context) (*RemoteConnection, error) {
 	grpcClient, err := MakeGRPCClient(remoteHostPort)
 
 	remote := &RemoteConnection{
 		remoteHostPort:  remoteHostPort,
+		remoteHost:      ExtractRemoteHostWithoutPort(remoteHostPort),
 		grpcClient:      grpcClient,
 		filesUploading:  MakeFilesUploading(daemon, grpcClient),
 		filesReceiving:  MakeFilesReceiving(daemon, grpcClient),
@@ -44,29 +54,23 @@ func MakeRemoteConnection(daemon *Daemon, remoteHostPort string, uploadStreamsCo
 		return remote, err
 	}
 
-	ctxConnect, cancelFunc := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancelFunc()
-
-	_, err = grpcClient.pb.StartClient(ctxConnect, &pb.StartClientRequest{
+	_, err = grpcClient.pb.StartClient(ctxWithTimeout, &pb.StartClientRequest{
 		ClientID:        daemon.clientID,
 		HostUserName:    daemon.hostUserName,
 		ClientVersion:   common.GetVersion(),
 		DisableObjCache: daemon.disableObjCache,
+		AllRemotesDelim: daemon.allRemotesDelim, // just to log on a server-side
 	})
 	if err != nil {
 		return remote, err
 	}
 
-	for i := 0; i < int(uploadStreamsCount); i++ {
-		if err := remote.filesUploading.CreateUploadStream(); err != nil {
-			return remote, err
-		}
+	if err := remote.filesUploading.CreateUploadStream(); err != nil {
+		return remote, err
 	}
 
-	for i := 0; i < int(receiveStreamsCount); i++ {
-		if err := remote.filesReceiving.CreateReceiveStream(); err != nil {
-			return remote, err
-		}
+	if err := remote.filesReceiving.CreateReceiveStream(); err != nil {
+		return remote, err
 	}
 
 	return remote, nil
@@ -78,7 +82,7 @@ func MakeRemoteConnection(daemon *Daemon, remoteHostPort string, uploadStreamsCo
 // As an output, the remote responds with files that are missing and needed to be uploaded.
 func (remote *RemoteConnection) StartCompilationSession(invocation *Invocation, cwd string, requiredFiles []*pb.FileMetadata) ([]uint32, error) {
 	if remote.isUnavailable {
-		return nil, fmt.Errorf("remote %s is unavailable", remote.remoteHostPort)
+		return nil, fmt.Errorf("remote %s is unavailable", remote.remoteHost)
 	}
 
 	startSessionReply, err := remote.grpcClient.pb.StartCompilationSession(

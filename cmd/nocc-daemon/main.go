@@ -91,17 +91,20 @@ func main() {
 	}
 
 	if *checkServersAndExit {
-		if len(remoteNoccHosts) == 0 {
-			failedStart("no remote hosts set; you should set NOCC_SERVERS or NOCC_SERVERS_FILENAME")
-		}
 		if len(os.Args) == 3 { // nocc -check-servers {remoteHostPort}
 			remoteNoccHosts = []string{os.Args[2]}
+		}
+		if len(remoteNoccHosts) == 0 {
+			failedStart("no remote hosts set; you should set NOCC_SERVERS or NOCC_SERVERS_FILENAME")
 		}
 		client.RequestRemoteStatus(remoteNoccHosts)
 		os.Exit(0)
 	}
 
 	if *dumpServerLogsAndExit {
+		if len(os.Args) == 3 { // nocc -dump-server-logs {remoteHostPort}
+			remoteNoccHosts = []string{os.Args[2]}
+		}
 		if len(remoteNoccHosts) == 0 {
 			failedStart("no remote hosts set; you should set NOCC_SERVERS or NOCC_SERVERS_FILENAME")
 		}

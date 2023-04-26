@@ -34,16 +34,18 @@ When you launch lots of jobs like `make -j 600`, then `nocc-daemon` has to maint
 All configuration on a server-side is done using command-line arguments.
 For a server, they are more reliable than environment variables.
 
-| Cmd argument             | Description                                                                             |
-|--------------------------|-----------------------------------------------------------------------------------------|
-| `-host {string}`         | Binding address, default 0.0.0.0.                                                       |
-| `-port {int}`            | Listening port, default 43210.                                                          |
-| `-working-dir {string}`  | Directory for saving incoming files, default */tmp/nocc-server*.                        |
-| `-log-filename {string}` | A filename to log, by default use stderr.                                               |
-| `-log-verbosity {int}`   | Logger verbosity level for INFO (-1 off, default 0, max 2). Errors are logged always.   |
-| `-src-cache-limit {int}` | Header and source cache limit, in bytes, default 4G.                                    |
-| `-obj-cache-limit {int}` | Compiled obj cache limit, in bytes, default 16G.                                        |
-| `-statsd {string}`       | Statsd udp address (host:port), omitted by default. If omitted, stats won't be written. |
+| Cmd argument              | Description                                                                             |
+|---------------------------|-----------------------------------------------------------------------------------------|
+| `-host {string}`          | Binding address, default 0.0.0.0.                                                       |
+| `-port {int}`             | Listening port, default 43210.                                                          |
+| `-cpp-dir {string}`       | Directory for incoming C++ files and src cache, default */tmp/nocc/cpp*.                |
+| `-obj-dir {string}`       | Directory for resulting obj files and obj cache, default */tmp/nocc/obj*.               |
+| `-log-filename {string}`  | A filename to log, by default use stderr.                                               |
+| `-log-verbosity {int}`    | Logger verbosity level for INFO (-1 off, default 0, max 2). Errors are logged always.   |
+| `-src-cache-limit {int}`  | Header and source cache limit, in bytes, default 4G.                                    |
+| `-obj-cache-limit {int}`  | Compiled obj cache limit, in bytes, default 16G.                                        |
+| `-statsd {string}`        | Statsd udp address (host:port), omitted by default. If omitted, stats won't be written. |
+| `-max-parallel-cxx {int}` | Max amount of C++ compiler processes launched in parallel, default *nCPU*.              |
 
 All file caches are lost on restart, as references to files are kept in memory. 
 There is also an LRU expiration mechanism to fit cache limits.
@@ -73,6 +75,26 @@ In grafana, to view deltas instead of rising metrics, one should use *nonNegativ
 
 A list of all written stats could be obtained [inside statsd.go](../internal/server/statsd.go), see the `fillBufferWithStats()` function. 
 They are quite intuitive, that's why we don't duplicate them here. 
+
+
+<p><br></p>
+
+## Configuring nocc + tmpfs
+
+The directory passed as `-cpp-dir` can be placed in **tmpfs**. 
+All operations with cpp files are performed in that directory: 
+* incoming files (h/cpp/etc.) are saved there mirroring client's file structure;
+* src-cache is placed there;
+* pch files are placed there;
+* tmp files for preventing race conditions are also there, not in sys tmp dir.
+
+So, if that directory is placed in tmpfs, the C++ compiler will take all files from memory (except for system headers),
+which noticeably speeds up compilation.
+
+When setting up limits to tmpfs in a system, ensure that it will fit `-src-cache-limit` plus some extra space.
+
+Note, that placing `-obj-dir` in tmpfs is not recommended, because obj files are usually much heavier,
+and they are just transparently streamed back from a hard disk in chunks.
 
 
 <p><br></p>

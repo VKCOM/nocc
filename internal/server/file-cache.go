@@ -42,9 +42,6 @@ type FileCache struct {
 const shardsDirCount = 256
 
 func createSubdirsForFileCache(cacheDir string) error {
-	if err := os.MkdirAll(cacheDir, os.ModePerm); err != nil {
-		return err
-	}
 	for i := 0; i < shardsDirCount; i++ {
 		dir := path.Join(cacheDir, fmt.Sprintf("%X", i))
 		if err := os.Mkdir(dir, os.ModePerm); err != nil {
@@ -67,14 +64,7 @@ func MakeFileCache(cacheDir string, limitBytes int64) (*FileCache, error) {
 	}, nil
 }
 
-func (cache *FileCache) ExistsInCache(key common.SHA256) bool {
-	cache.mu.RLock()
-	_, exists := cache.table[key]
-	cache.mu.RUnlock()
-	return exists
-}
-
-func (cache *FileCache) CreateHardLinkFromCache(destPath string, key common.SHA256) bool {
+func (cache *FileCache) LookupInCache(key common.SHA256) string {
 	cache.mu.Lock()
 	cachedFile := cache.table[key]
 	if cachedFile.lruNode != nil && cachedFile.lruNode != cache.lruHead {
@@ -95,30 +85,30 @@ func (cache *FileCache) CreateHardLinkFromCache(destPath string, key common.SHA2
 	}
 	cache.mu.Unlock()
 
-	if cachedFile.lruNode == nil {
+	return cachedFile.pathInCache // empty if cachedFile doesn't exist
+}
+
+func (cache *FileCache) CreateHardLinkFromCache(serverFileName string, key common.SHA256) bool {
+	pathInCache := cache.LookupInCache(key)
+	if len(pathInCache) == 0 {
 		return false
 	}
 
-	err := os.MkdirAll(path.Dir(destPath), os.ModePerm)
-	if err != nil {
-		return false
-	}
-	err = os.Link(cachedFile.pathInCache, destPath)
+	// path.Dir(serverFileName) must be created in advance
+	err := os.Link(pathInCache, serverFileName)
 	return err == nil || os.IsExist(err)
 }
 
-func (cache *FileCache) SaveFileToCache(srcPath string, key common.SHA256, fileSize int64) error {
+func (cache *FileCache) SaveFileToCache(srcPath string, fileNameInCacheDir string, key common.SHA256, fileSize int64) error {
 	uniqueID := atomic.AddInt64(&cache.lastIndex, 1)
-	fileName := path.Base(srcPath)
-	cachedFileName := fmt.Sprintf("%X/%s.%X", uniqueID%shardsDirCount, fileName, uniqueID)
-	cachedFilePath := path.Join(cache.cacheDir, cachedFileName)
+	pathInCache := fmt.Sprintf("%s/%X/%s.%X", cache.cacheDir, uniqueID%shardsDirCount, fileNameInCacheDir, uniqueID)
 
-	if err := os.Link(srcPath, cachedFilePath); err != nil {
+	if err := os.Link(srcPath, pathInCache); err != nil {
 		return err
 	}
 
 	newHead := &lruNode{key: key}
-	value := cachedFile{pathInCache: cachedFilePath, fileSize: fileSize, lruNode: newHead}
+	value := cachedFile{pathInCache, fileSize, newHead}
 	cache.mu.Lock()
 	_, exists := cache.table[key]
 	if !exists {
@@ -136,7 +126,7 @@ func (cache *FileCache) SaveFileToCache(srcPath string, key common.SHA256, fileS
 	cache.mu.Unlock()
 
 	if exists {
-		_ = os.Remove(cachedFilePath)
+		_ = os.Remove(pathInCache)
 	}
 
 	cache.purgeLastElementsTillLimit(cache.hardLimit)

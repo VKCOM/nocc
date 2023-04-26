@@ -5,23 +5,18 @@ import (
 	"io"
 	"os"
 
-	"github.com/VKCOM/nocc/internal/common"
 	"github.com/VKCOM/nocc/pb"
 )
 
 // receiveUploadedFileByChunks is an actual implementation of piping a client stream to a local server file.
 // See client.uploadFileByChunks.
-func receiveUploadedFileByChunks(stream pb.CompilationService_UploadFileStreamServer, firstChunk *pb.UploadFileChunkRequest, expectedBytes int, serverFileName string) (err error) {
+func receiveUploadedFileByChunks(noccServer *NoccServer, stream pb.CompilationService_UploadFileStreamServer, firstChunk *pb.UploadFileChunkRequest, expectedBytes int, serverFileName string) (err error) {
 	receivedBytes := len(firstChunk.ChunkBody)
 
-	if receivedBytes >= expectedBytes {
-		if err = common.MkdirForFile(serverFileName); err == nil {
-			err = os.WriteFile(serverFileName, firstChunk.ChunkBody, os.ModePerm)
-		}
-		return
-	}
-
-	fileTmp, err := common.OpenTempFile(serverFileName, true)
+	// we write to a tmp file and rename it to serverFileName after saving
+	// it prevents races from concurrent writing to the same file
+	// (this situation is possible on a slow network when a file was requested several times)
+	fileTmp, err := noccServer.SrcFileCache.MakeTempFileForUploadSaving(serverFileName)
 	if err == nil {
 		_, err = fileTmp.Write(firstChunk.ChunkBody)
 	}

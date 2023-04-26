@@ -18,10 +18,10 @@ import (
 type Session struct {
 	sessionID uint32
 
-	cppInFile  string
-	objOutFile string
-	cxxCwd     string
-	cxxName    string
+	cppInFile  string // as-is from a client cmd line (relative to cxxCwd on a server-side)
+	objOutFile string // inside /tmp/nocc/obj/cxx-out, or directly in /tmp/nocc/obj/obj-cache if taken from cache
+	cxxCwd     string // cwd for the C++ compiler on a server-side (= client.workingDir + clientCwd)
+	cxxName    string // g++ / clang / etc.
 	cxxCmdLine []string
 
 	client *Client
@@ -40,7 +40,29 @@ type Session struct {
 // PrepareServerCxxCmdLine prepares a command line for cxx invocation.
 // Notably, options like -Wall and -fpch-preprocess are pushed as is,
 // but include dirs like /home/alice/headers need to be remapped to point to server dir.
-func (session *Session) PrepareServerCxxCmdLine(cxxArgs []string, cxxIDirs []string) []string {
+func (session *Session) PrepareServerCxxCmdLine(noccServer *NoccServer, clientCwd string, cxxArgs []string, cxxIDirs []string) {
+	session.objOutFile = noccServer.ObjFileCache.GenerateObjOutFileName(session)
+
+	var cppInFile string
+	// old clients that don't send this field (they send abs cppInFile)
+	// todo delete later, after upgrading all clients
+	if clientCwd == "" {
+		cppInFile = session.client.MapClientFileNameToServerAbs(session.cppInFile)
+		session.cxxCwd = session.client.workingDir
+	} else {
+		// session.cppInFile is as-is from a client cmd line:
+		// * "/abs/path" becomes "client.workingDir/abs/path"
+		//    (except for system files, /usr/include left unchanged)
+		// * "rel/path" (relative to clientCwd) is left as-is (becomes relative to session.cxxCwd)
+		//    (for correct __FILE__ expansion and other minor specifics)
+		if session.cppInFile[0] == '/' {
+			cppInFile = session.client.MapClientFileNameToServerAbs(session.cppInFile)
+		} else {
+			cppInFile = session.cppInFile
+		}
+		session.cxxCwd = session.client.MapClientFileNameToServerAbs(clientCwd)
+	}
+
 	cxxCmdLine := make([]string, 0, len(cxxIDirs)+len(cxxArgs)+3)
 
 	// loop through -I {dir} / -include {file} / etc. (format is guaranteed), converting client {dir} to server path
@@ -51,25 +73,14 @@ func (session *Session) PrepareServerCxxCmdLine(cxxArgs []string, cxxIDirs []str
 	}
 	// append -Wall and other cxx args
 	cxxCmdLine = append(cxxCmdLine, cxxArgs...)
-	// append output and input (they won't take part in obj cache key calculation, like -I)
-	return append(cxxCmdLine, "-o", session.objOutFile, session.cppInFile)
+	// build final string
+	session.cxxCmdLine = append(cxxCmdLine, "-o", session.objOutFile, cppInFile)
 }
 
 // StartCompilingObjIfPossible executes cxx if all dependent files (.cpp/.h/.nocc-pch/etc.) are ready.
 // They have either been uploaded by the client or already taken from src cache.
+// Note, that it's called for sessions that don't exist in obj cache.
 func (session *Session) StartCompilingObjIfPossible(noccServer *NoccServer) {
-	// optimistic path: if .o file exists in cache, files aren't needed to (and aren't requested to) be uploaded
-	if session.objCacheExists { // avoid calling ExistsInCache (when false, it's launched on every file upload)
-		if atomic.SwapInt32(&session.compilationStarted, 1) == 0 {
-			logServer.Info(2, "get obj from cache", "sessionID", session.sessionID, session.objOutFile)
-			if !noccServer.ObjFileCache.CreateHardLinkFromCache(session.objOutFile, session.objCacheKey) {
-				logServer.Error("could not create hard link from obj cache", "sessionID", session.sessionID)
-			}
-			session.PushToClientReadyChannel()
-		}
-		return
-	}
-
 	for _, file := range session.files {
 		if file.state != fsFileStateUploaded {
 			return
@@ -77,7 +88,7 @@ func (session *Session) StartCompilingObjIfPossible(noccServer *NoccServer) {
 	}
 
 	if atomic.SwapInt32(&session.compilationStarted, 1) == 0 {
-		noccServer.CxxLauncher.chanToCompile <- session
+		go noccServer.CxxLauncher.LaunchCxxWhenPossible(noccServer, session)
 	}
 }
 
@@ -86,5 +97,6 @@ func (session *Session) PushToClientReadyChannel() {
 	select {
 	case <-session.client.chanDisconnected:
 	case session.client.chanReadySessions <- session:
+		// note, that if this chan is full, this 'case' (and this function call) is blocking
 	}
 }

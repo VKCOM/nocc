@@ -17,7 +17,7 @@ type invocationTimingItem struct {
 // It's mostly for developing/debugging purposes: multiple nocc invocations are appended to a single log file,
 // from which we can compute statistics, average and percentiles, either in total or partitioned by hosts.
 type InvocationSummary struct {
-	remoteHostPort string
+	remoteHost string
 
 	nIncludes      int
 	nFilesSent     int
@@ -44,7 +44,7 @@ func (s *InvocationSummary) ToLogString(invocation *Invocation) string {
 
 	b := strings.Builder{}
 	fmt.Fprintf(&b, "cppInFile=%q, remote=%s, sessionID=%d, nIncludes=%d, nFilesSent=%d, nBytesSent=%d, nBytesReceived=%d, cxxDuration=%dms",
-		invocation.cppInFile, s.remoteHostPort, invocation.sessionID, s.nIncludes, s.nFilesSent, s.nBytesSent, s.nBytesReceived, invocation.cxxDuration)
+		invocation.cppInFile, s.remoteHost, invocation.sessionID, s.nIncludes, s.nFilesSent, s.nBytesSent, s.nBytesReceived, invocation.cxxDuration)
 
 	prevTime := invocation.createTime
 	fmt.Fprintf(&b, ", started=0ms")

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -15,16 +16,19 @@ type ClientsStorage struct {
 	table map[string]*Client
 	mu    sync.RWMutex
 
-	clientsDir string // /tmp/nocc-server/clients
+	clientsDir string // /tmp/nocc/cpp/clients
 
 	completedCount int64
 	lastPurgeTime  time.Time
+
+	uniqueRemotesList map[string]string
 }
 
 func MakeClientsStorage(clientsDir string) (*ClientsStorage, error) {
 	return &ClientsStorage{
-		table:      make(map[string]*Client, 1024),
-		clientsDir: clientsDir,
+		table:             make(map[string]*Client, 1024),
+		clientsDir:        clientsDir,
+		uniqueRemotesList: make(map[string]string, 1),
 	}, nil
 }
 
@@ -50,7 +54,7 @@ func (allClients *ClientsStorage) OnClientConnected(clientID string, disableObjC
 	}
 
 	workingDir := path.Join(allClients.clientsDir, clientID)
-	if err := os.MkdirAll(workingDir, os.ModePerm); err != nil {
+	if err := os.Mkdir(workingDir, os.ModePerm); err != nil {
 		return nil, fmt.Errorf("can't create client working directory: %v", err)
 	}
 
@@ -60,8 +64,9 @@ func (allClients *ClientsStorage) OnClientConnected(clientID string, disableObjC
 		lastSeen:          time.Now(),
 		sessions:          make(map[uint32]*Session, 20),
 		files:             make(map[string]*fileInClientDir, 1024),
+		dirs:              make(map[string]bool, 100),
 		chanDisconnected:  make(chan struct{}),
-		chanReadySessions: make(chan *Session, 100),
+		chanReadySessions: make(chan *Session, 200),
 		disableObjCache:   disableObjCache,
 	}
 
@@ -102,7 +107,7 @@ func (allClients *ClientsStorage) DeleteInactiveClients() {
 			break
 		}
 
-		logServer.Info(0, "delete inactive client", "clientID", inactiveClient.clientID, "num files", inactiveClient.FilesCount())
+		logServer.Info(0, "delete inactive client", "clientID", inactiveClient.clientID, "num files", inactiveClient.FilesCount(), "; nClients", allClients.ActiveCount()-1)
 		allClients.DeleteClient(inactiveClient)
 	}
 }
@@ -147,4 +152,34 @@ func (allClients *ClientsStorage) TotalFilesCountInDirs() int64 {
 	}
 	allClients.mu.RUnlock()
 	return filesCount
+}
+
+// IsRemotesListSeenTheFirstTime maintains allClients.uniqueRemotesList.
+// It's mostly for debug purposes — to detect clients with strange NOCC_SERVERS env.
+// Probably, will be deleted in the future.
+func (allClients *ClientsStorage) IsRemotesListSeenTheFirstTime(allRemotesDelim string, clientID string) bool {
+	allClients.mu.RLock()
+	_, exists := allClients.uniqueRemotesList[allRemotesDelim]
+	allClients.mu.RUnlock()
+
+	if !exists {
+		allClients.mu.Lock()
+		allClients.uniqueRemotesList[allRemotesDelim] = clientID
+		allClients.mu.Unlock()
+	}
+
+	return !exists
+}
+
+func (allClients *ClientsStorage) GetUniqueRemotesListInfo() (uniqueInfo []string) {
+	allClients.mu.RLock()
+
+	uniqueInfo = make([]string, 0, len(allClients.uniqueRemotesList))
+	for allRemotesDelim, clientID := range allClients.uniqueRemotesList {
+		nRemotes := strings.Count(allRemotesDelim, ",") + 1
+		uniqueInfo = append(uniqueInfo, fmt.Sprintf("(n=%d) clientID %s : %s", nRemotes, clientID, allRemotesDelim))
+	}
+
+	allClients.mu.RUnlock()
+	return
 }

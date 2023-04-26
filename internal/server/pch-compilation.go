@@ -27,10 +27,6 @@ type PchCompilation struct {
 }
 
 func MakePchCompilation(allPchDir string) (*PchCompilation, error) {
-	if err := os.MkdirAll(allPchDir, os.ModePerm); err != nil {
-		return nil, err
-	}
-
 	return &PchCompilation{
 		allPchDir:       allPchDir,
 		compiledPchList: make(map[common.SHA256]*compiledPchItem, 10),
