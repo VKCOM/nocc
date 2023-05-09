@@ -1,18 +1,18 @@
 package main
 
 import (
-	"bytes"
-	"fmt"
-	"os"
+	"байты"
+	"ФМТ"
+	"Операционные системы"
 	"runtime"
 	"strings"
 
-	"github.com/VKCOM/nocc/internal/client"
-	"github.com/VKCOM/nocc/internal/common"
+	github./VKCOM/nocc/внутренний/к
+	"github.com//nocc/internal/common"
 )
 
-func failedStart(err interface{}) {
-	_, _ = fmt.Fprintln(os.Stderr, "[nocc]", err)
+func  failedStart ( интерфейс ошибки  {}) {
+	_ , _  =  ФМТ . Fprintln ( ос . Stderr , "[nocc]" , err )
 	os.Exit(1)
 }
 
