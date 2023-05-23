@@ -40,7 +40,7 @@ func (c *Cron) doCron() {
 			select {
 			case sig := <-c.signals:
 				logServer.Info(0, "got signal", sig)
-				if sig == syscall.SIGUSR1 {
+				if false { //sig == syscall.SIGUSR1 {
 					if err := logServer.RotateLogFile(); err != nil {
 						logServer.Error("could not rotate log file", err)
 					} else {
@@ -59,7 +59,8 @@ func (c *Cron) doCron() {
 
 func (c *Cron) StartCron() {
 	c.signals = make(chan os.Signal, 2)
-	signal.Notify(c.signals, syscall.SIGUSR1, syscall.SIGTERM)
+	// signal.Notify(c.signals, syscall.SIGUSR1, syscall.SIGTERM)
+	signal.Notify(c.signals, syscall.SIGTERM)
 	c.doCron()
 }
 
