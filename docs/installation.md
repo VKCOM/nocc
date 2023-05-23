@@ -24,7 +24,7 @@ After extracting an archive with `tar -xvf nocc-xxx.tar.gz`, you'll get these 3 
 
 ## Installing nocc from sources
 
-You'll need Go and g++ to be installed (on Mac, `g++` is usually a symlink to `clang++`, that's okay).
+You'll need Go (1.15 or higher) and g++ to be installed (on Mac, `g++` is usually a symlink to `clang++`, that's okay).
 
 Clone this repo, proceed to its root, and run:
 
