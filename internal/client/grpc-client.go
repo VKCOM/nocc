@@ -5,6 +5,7 @@ import (
 
 	"github.com/VKCOM/nocc/pb"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type GRPCClient struct {
@@ -20,7 +21,7 @@ func MakeGRPCClient(remoteHostPort string) (*GRPCClient, error) {
 	// if the remote is not available, it will fail on request
 	connection, err := grpc.Dial(
 		remoteHostPort,
-		grpc.WithInsecure(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(),
 	)
 	if err != nil {
