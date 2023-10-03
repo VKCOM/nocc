@@ -44,7 +44,7 @@ char *format_time_to_log() {
   static char time_buf[64];
   time_t ts = time(nullptr);
   tm *now = localtime(&ts);
-  sprintf(time_buf, "%d-%02d-%02d %02d:%02d:%02d", 1900 + now->tm_year, 1 + now->tm_mon, now->tm_mday, now->tm_hour, now->tm_min, now->tm_sec);
+  snprintf(time_buf, 64, "%d-%02d-%02d %02d:%02d:%02d", 1900 + now->tm_year, 1 + now->tm_mon, now->tm_mday, now->tm_hour, now->tm_min, now->tm_sec);
   return time_buf;
 }
 
