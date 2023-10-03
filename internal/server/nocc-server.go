@@ -12,7 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
-	"syscall"
+
+	// "syscall"
 	"time"
 
 	"github.com/VKCOM/nocc/internal/common"
@@ -62,9 +63,10 @@ func (s *NoccServer) StartGRPCListening(listenAddr string) (net.Listener, error)
 
 	logServer.Info(0, "nocc-server started")
 
-	var rLimit syscall.Rlimit
-	_ = syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit)
-	logServer.Info(0, "env:", "listenAddr", listenAddr, "; ulimit -n", rLimit.Cur, "; num cpu", runtime.NumCPU(), "; version", common.GetVersion())
+	// var rLimit syscall.Rlimit
+	// _ = syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit)
+	// logServer.Info(0, "env:", "listenAddr", listenAddr, "; ulimit -n", rLimit.Cur, "; num cpu", runtime.NumCPU(), "; version", common.GetVersion())
+	logServer.Info(0, "env:", "listenAddr", listenAddr, "; num cpu", runtime.NumCPU(), "; version", common.GetVersion())
 
 	return listener, s.GRPCServer.Serve(listener)
 }
@@ -371,8 +373,8 @@ func (s *NoccServer) Status(context.Context, *pb.StatusRequest) (*pb.StatusReply
 	clangRawOut, _ := exec.Command("clang", "-v").CombinedOutput()
 	uNameRV, _ := exec.Command("uname", "-rv").CombinedOutput()
 
-	var rLimit syscall.Rlimit
-	_ = syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit)
+	// var rLimit syscall.Rlimit
+	// _ = syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit)
 
 	return &pb.StatusReply{
 		ServerVersion:   common.GetVersion(),
@@ -383,7 +385,7 @@ func (s *NoccServer) Status(context.Context, *pb.StatusRequest) (*pb.StatusReply
 		LogFileSize:     logServer.GetFileSize(),
 		SrcCacheSize:    s.SrcFileCache.GetBytesOnDisk(),
 		ObjCacheSize:    s.ObjFileCache.GetBytesOnDisk(),
-		ULimit:          int64(rLimit.Cur),
+		ULimit:          int64(65535),
 		UName:           strings.TrimSpace(string(uNameRV)),
 		SessionsTotal:   atomic.LoadInt64(&s.Stats.sessionsCount),
 		SessionsActive:  s.ActiveClients.ActiveSessionsCount(),
