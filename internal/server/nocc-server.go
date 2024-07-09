@@ -217,7 +217,7 @@ func (s *NoccServer) UploadFileStream(stream pb.CompilationService_UploadFileStr
 	for {
 		firstChunk, err := stream.Recv()
 		if err != nil {
-			if stream.Context().Err() != context.Canceled {
+			if !errors.Is(stream.Context().Err(), context.Canceled) {
 				logServer.Error("stream receive error:", err.Error())
 			}
 			return err
