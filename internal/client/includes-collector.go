@@ -231,7 +231,12 @@ func parseCxxDefaultIncludeDirsFromWpStderr(cxxWpStderr string) IncludeDirs {
 				cxxDefIncludeDirs.dirsIquote = append(cxxDefIncludeDirs.dirsIquote, line)
 			case stateInDirsI:
 				if strings.HasPrefix(line, "/usr/") || strings.HasPrefix(line, "/Library/") {
-					cxxDefIncludeDirs.dirsIsystem = append(cxxDefIncludeDirs.dirsIsystem, line)
+					normalizedPath, err := filepath.Abs(line)
+					if err != nil {
+						logClient.Error("can't normalize path:", line)
+						continue
+					}
+					cxxDefIncludeDirs.dirsIsystem = append(cxxDefIncludeDirs.dirsIsystem, normalizedPath)
 				} else {
 					cxxDefIncludeDirs.dirsI = append(cxxDefIncludeDirs.dirsI, line)
 				}
@@ -266,6 +271,7 @@ func extractIncludesFromCxxMStdout(cxxMStdout []byte) []string {
 
 // CompareOwnIncludesParserAndCxxM is for development purposes.
 // Perform a full-text search for this method call.
+//
 //goland:noinspection GoUnusedExportedFunction
 func CompareOwnIncludesParserAndCxxM(cppInFile string, ownFoundHFiles []IncludedFile, cxxMFoundHFiles []IncludedFile) bool {
 	equal := true
