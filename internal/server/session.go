@@ -71,8 +71,12 @@ func (session *Session) PrepareServerCxxCmdLine(noccServer *NoccServer, clientCw
 		serverIdir := session.client.MapClientFileNameToServerAbs(cxxIDirs[i+1])
 		cxxCmdLine = append(cxxCmdLine, arg, serverIdir)
 	}
-	// append -Wall and other cxx args
-	cxxCmdLine = append(cxxCmdLine, cxxArgs...)
+
+	for i := 0; i < len(cxxArgs); i++ {
+		cxxArg := FilePrefixMapOption(cxxArgs[i], session.client.workingDir)
+
+		cxxCmdLine = append(cxxCmdLine, cxxArg)
+	}
 	// build final string
 	session.cxxCmdLine = append(cxxCmdLine, "-o", session.objOutFile, cppInFile)
 }
