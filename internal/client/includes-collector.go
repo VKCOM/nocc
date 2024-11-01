@@ -121,7 +121,7 @@ func CollectDependentIncludesByCxxM(includesCache *IncludesCache, cwd string, cx
 // This is done by -Wp,-v option for a no input file.
 // This result is cached once nocc-daemon is started.
 func GetDefaultCxxIncludeDirsOnLocal(cxxName string) (IncludeDirs, error) {
-	cxxWpCommand := exec.Command(cxxName, "-Wp,-v", "-x", "c++", "/dev/null", "-fsyntax-only")
+	cxxWpCommand := exec.Command(cxxName, "-Wp,-v", "-x", "c++", "/dev/null", "-fsyntax-only", "-stdlib=libc++")
 	var cxxWpStderr bytes.Buffer
 	cxxWpCommand.Stderr = &cxxWpStderr
 	if err := cxxWpCommand.Run(); err != nil {
