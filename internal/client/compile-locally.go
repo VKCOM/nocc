@@ -13,7 +13,7 @@ import (
 // Note, that local compilation is performed within a daemon instead of passing it to C++ wrappers.
 // This is done in order to maintain a single queue.
 // (`nocc` is typically launched with a very huge number of concurrent processes, and if network is broken,
-//  this queue makes a huge bunch of `nocc` invocations to be throttled to a limited number of local cxx processes).
+// this queue makes a huge bunch of `nocc` invocations to be throttled to a limited number of local cxx processes).
 type LocalCxxLaunch struct {
 	cmdLine []string
 	cwd     string
