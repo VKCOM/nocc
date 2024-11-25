@@ -139,9 +139,10 @@ func (daemon *Daemon) StartListeningUnixSocket(daemonUnixSock string) error {
 func (daemon *Daemon) ServeUntilNobodyAlive() {
 	logClient.Info(0, "nocc-daemon started in", time.Since(daemon.startTime).Milliseconds(), "ms")
 
-	var rLimit syscall.Rlimit
-	_ = syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit)
-	logClient.Info(0, "env:", "clientID", daemon.clientID, "; user", daemon.hostUserName, "; num servers", len(daemon.remoteConnections), "; ulimit -n", rLimit.Cur, "; num cpu", runtime.NumCPU(), "; version", common.GetVersion())
+	// var rLimit syscall.Rlimit
+	// _ = syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit)
+	// logClient.Info(0, "env:", "clientID", daemon.clientID, "; user", daemon.hostUserName, "; num servers", len(daemon.remoteConnections), "; ulimit -n", rLimit.Cur, "; num cpu", runtime.NumCPU(), "; version", common.GetVersion())
+	logClient.Info(0, "env:", "clientID", daemon.clientID, "; user", daemon.hostUserName, "; num servers", len(daemon.remoteConnections), "; num cpu", runtime.NumCPU(), "; version", common.GetVersion())
 
 	go daemon.PeriodicallyInterruptHangedInvocations()
 	go daemon.listener.StartAcceptingConnections(daemon)
