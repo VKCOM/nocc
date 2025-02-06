@@ -27,8 +27,8 @@ type IncludesCache struct {
 	mu sync.RWMutex
 }
 
-func MakeIncludesCache(cxxName string) (*IncludesCache, error) {
-	cxxDefIDirs, err := GetDefaultCxxIncludeDirsOnLocal(cxxName)
+func MakeIncludesCache(cxxName string, cxxArgs []string) (*IncludesCache, error) {
+	cxxDefIDirs, err := GetDefaultCxxIncludeDirsOnLocal(cxxName, cxxArgs)
 
 	return &IncludesCache{
 		cxxName:         cxxName,
