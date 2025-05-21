@@ -75,6 +75,8 @@ func main() {
 		"", "NOCC_DISABLE_OWN_INCLUDES")
 	localCxxQueueSize := common.CmdEnvInt("Amount of parallel processes when remotes aren't available and cxx is launched locally.\nBy default, it's a number of CPUs on the current machine.", int64(runtime.NumCPU()),
 		"", "NOCC_LOCAL_CXX_QUEUE_SIZE")
+	forceInterruptTimeout := common.CmdEnvInt("Timeout after how long the daemon will force a connection termination (The value is specified in minutes). By default, it's 8 minutes.", 8,
+		"", "NOCC_FORCE_INTERRUPT_TIMEOUT")
 
 	common.ParseCmdFlagsCombiningWithEnv()
 
@@ -128,7 +130,7 @@ func main() {
 			failedStartDaemon(err)
 		}
 
-		daemon, err := client.MakeDaemon(remoteNoccHosts, *disableObjCache, *disableOwnIncludes, *localCxxQueueSize)
+		daemon, err := client.MakeDaemon(remoteNoccHosts, *disableObjCache, *disableOwnIncludes, *localCxxQueueSize, *forceInterruptTimeout)
 		if err != nil {
 			failedStartDaemon(err)
 		}
