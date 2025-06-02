@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type cmdLineArg interface {
@@ -142,6 +143,46 @@ func (s *cmdLineArgInt) isFlagSet() bool {
 	return s.isSet
 }
 
+type cmdLineArgDuration struct {
+	cmdName string
+	envName string
+	usage   string
+
+	isSet bool
+	def   time.Duration
+	value time.Duration
+}
+
+func (s *cmdLineArgDuration) String() string {
+	return s.value.String()
+}
+
+func (s *cmdLineArgDuration) Set(v string) error {
+	s.isSet = true
+	t, err := time.ParseDuration(v)
+	if err != nil {
+		return err
+	}
+	s.value = t
+	return nil
+}
+
+func (s *cmdLineArgDuration) getCmdName() string {
+	return s.cmdName
+}
+
+func (s *cmdLineArgDuration) getEnvName() string {
+	return s.envName
+}
+
+func (s *cmdLineArgDuration) getDescription() string {
+	return s.usage
+}
+
+func (s *cmdLineArgDuration) isFlagSet() bool {
+	return s.isSet
+}
+
 func initCmdFlag(s cmdLineArg, cmdName string, usage string) {
 	if cmdName != "" { // only env var makes sense
 		flag.Var(s, cmdName, usage)
@@ -193,6 +234,13 @@ func CmdEnvBool(usage string, def bool, cmdFlagName string, envName string) *boo
 
 func CmdEnvInt(usage string, def int64, cmdFlagName string, envName string) *int64 {
 	var sf = &cmdLineArgInt{cmdFlagName, envName, usage, false, def, def}
+	allCmdLineArgs = append(allCmdLineArgs, sf)
+	initCmdFlag(sf, cmdFlagName, usage)
+	return &sf.value
+}
+
+func CmdEnvDuration(usage string, def time.Duration, cmdFlagName string, envName string) *time.Duration {
+	var sf = &cmdLineArgDuration{cmdFlagName, envName, usage, false, def, def}
 	allCmdLineArgs = append(allCmdLineArgs, sf)
 	initCmdFlag(sf, cmdFlagName, usage)
 	return &sf.value

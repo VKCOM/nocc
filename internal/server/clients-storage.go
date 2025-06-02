@@ -25,12 +25,12 @@ type ClientsStorage struct {
 	uniqueRemotesList map[string]string
 }
 
-func MakeClientsStorage(clientsDir string, checkInactiveTimeout int64) (*ClientsStorage, error) {
+func MakeClientsStorage(clientsDir string, checkInactiveTimeout time.Duration) (*ClientsStorage, error) {
 	return &ClientsStorage{
 		table:                make(map[string]*Client, 1024),
 		clientsDir:           clientsDir,
 		uniqueRemotesList:    make(map[string]string, 1),
-		checkInactiveTimeout: time.Duration(checkInactiveTimeout) * time.Minute,
+		checkInactiveTimeout: checkInactiveTimeout,
 	}, nil
 }
 

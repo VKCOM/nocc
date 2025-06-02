@@ -79,7 +79,7 @@ func main() {
 		"statsd", "")
 	maxParallelCxx := common.CmdEnvInt("Max amount of C++ compiler processes launched in parallel, other ready sessions are waiting in a queue.\nBy default, it's a number of CPUs on the current machine.", int64(runtime.NumCPU()),
 		"max-parallel-cxx", "")
-	checkInactiveTimeout := common.CmdEnvInt("The time since the last activity, after which the server will consider the client to be inactive (The value is specified in minutes). By default, it's 5 minutes.", 5,
+	checkInactiveTimeout := common.CmdEnvDuration("The time since the last activity, after which the server will consider the client to be inactive. By default, it's 5 minutes.", 5*time.Minute,
 		"check-inactive-timeout", "")
 
 	common.ParseCmdFlagsCombiningWithEnv()

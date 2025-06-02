@@ -76,7 +76,7 @@ func detectHostUserName() string {
 	return curUser.Username
 }
 
-func MakeDaemon(remoteNoccHosts []string, disableObjCache bool, disableOwnIncludes bool, maxLocalCxxProcesses int64, forceInterruptTimeout int64) (*Daemon, error) {
+func MakeDaemon(remoteNoccHosts []string, disableObjCache bool, disableOwnIncludes bool, maxLocalCxxProcesses int64, forceInterruptTimeout time.Duration) (*Daemon, error) {
 	// send env NOCC_SERVERS on connect everywhere
 	// this is for debugging purpose: in production, all clients should have the same servers list
 	// to ensure this, just grep server logs: only one unique string should appear
@@ -103,7 +103,7 @@ func MakeDaemon(remoteNoccHosts []string, disableObjCache bool, disableOwnInclud
 		disableLocalCxx:       maxLocalCxxProcesses == 0,
 		activeInvocations:     make(map[uint32]*Invocation, 300),
 		includesCache:         make(map[string]*IncludesCache, 1),
-		forceInterruptTimeout: time.Duration(forceInterruptTimeout) * time.Minute,
+		forceInterruptTimeout: forceInterruptTimeout,
 	}
 
 	// connect to all remotes in parallel
