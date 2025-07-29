@@ -203,6 +203,9 @@ func customPrintUsage() {
 		if _, is := f.(*cmdLineArgInt); is {
 			valueHint = " integer"
 		}
+		if _, is := f.(*cmdLineArgDuration); is {
+			valueHint = " duration"
+		}
 		if f.getCmdName() == "version" {
 			valueHint = " / -v"
 		}
