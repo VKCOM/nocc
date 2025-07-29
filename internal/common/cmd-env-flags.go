@@ -28,9 +28,9 @@ type cmdLineArgString struct {
 	envName string
 	usage   string
 
-	isSet bool
-	def   string
-	value string
+	isSet        bool
+	defaultValue string
+	value        string
 }
 
 func (s *cmdLineArgString) String() string {
@@ -64,9 +64,9 @@ type cmdLineArgBool struct {
 	envName string
 	usage   string
 
-	isSet bool
-	def   bool
-	value bool
+	isSet        bool
+	defaultValue bool
+	value        bool
 }
 
 func (s *cmdLineArgBool) String() string {
@@ -108,9 +108,9 @@ type cmdLineArgInt struct {
 	envName string
 	usage   string
 
-	isSet bool
-	def   int64
-	value int64
+	isSet        bool
+	defaultValue int64
+	value        int64
 }
 
 func (s *cmdLineArgInt) String() string {
@@ -148,9 +148,9 @@ type cmdLineArgDuration struct {
 	envName string
 	usage   string
 
-	isSet bool
-	def   time.Duration
-	value time.Duration
+	isSet        bool
+	defaultValue time.Duration
+	value        time.Duration
 }
 
 func (s *cmdLineArgDuration) String() string {
@@ -221,29 +221,29 @@ func customPrintUsage() {
 	}
 }
 
-func CmdEnvString(usage string, def string, cmdFlagName string, envName string) *string {
-	sf := &cmdLineArgString{cmdFlagName, envName, usage, false, def, def}
+func CmdEnvString(usage string, defaultValue string, cmdFlagName string, envName string) *string {
+	sf := &cmdLineArgString{cmdFlagName, envName, usage, false, defaultValue, defaultValue}
 	allCmdLineArgs = append(allCmdLineArgs, sf)
 	initCmdFlag(sf, cmdFlagName, usage)
 	return &sf.value
 }
 
-func CmdEnvBool(usage string, def bool, cmdFlagName string, envName string) *bool {
-	var sf = &cmdLineArgBool{cmdFlagName, envName, usage, false, def, def}
+func CmdEnvBool(usage string, defaultValue bool, cmdFlagName string, envName string) *bool {
+	var sf = &cmdLineArgBool{cmdFlagName, envName, usage, false, defaultValue, defaultValue}
 	allCmdLineArgs = append(allCmdLineArgs, sf)
 	initCmdFlag(sf, cmdFlagName, usage)
 	return &sf.value
 }
 
-func CmdEnvInt(usage string, def int64, cmdFlagName string, envName string) *int64 {
-	var sf = &cmdLineArgInt{cmdFlagName, envName, usage, false, def, def}
+func CmdEnvInt(usage string, defaultValue int64, cmdFlagName string, envName string) *int64 {
+	var sf = &cmdLineArgInt{cmdFlagName, envName, usage, false, defaultValue, defaultValue}
 	allCmdLineArgs = append(allCmdLineArgs, sf)
 	initCmdFlag(sf, cmdFlagName, usage)
 	return &sf.value
 }
 
-func CmdEnvDuration(usage string, def time.Duration, cmdFlagName string, envName string) *time.Duration {
-	var sf = &cmdLineArgDuration{cmdFlagName, envName, usage, false, def, def}
+func CmdEnvDuration(usage string, defaultValue time.Duration, cmdFlagName string, envName string) *time.Duration {
+	var sf = &cmdLineArgDuration{cmdFlagName, envName, usage, false, defaultValue, defaultValue}
 	allCmdLineArgs = append(allCmdLineArgs, sf)
 	initCmdFlag(sf, cmdFlagName, usage)
 	return &sf.value
