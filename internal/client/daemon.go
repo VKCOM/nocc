@@ -18,10 +18,6 @@ import (
 	"github.com/VKCOM/nocc/internal/common"
 )
 
-const (
-	timeoutForceInterruptInvocation = 8 * time.Minute
-)
-
 // Daemon is created once, in a separate process `nocc-daemon`, which is listening for connections via unix socket.
 // `nocc-daemon` is created by the first `nocc` invocation.
 // `nocc` is invoked from cmake/kphp. It's a lightweight C++ wrapper that pipes command-line invocation to a daemon.
@@ -49,6 +45,8 @@ type Daemon struct {
 	mu                sync.RWMutex
 
 	includesCache map[string]*IncludesCache // map[cxx_name] => cache (support various cxx compilers during a daemon lifetime)
+
+	forceInterruptTimeout time.Duration
 }
 
 // detectClientID returns a clientID for current daemon launch.
@@ -78,7 +76,7 @@ func detectHostUserName() string {
 	return curUser.Username
 }
 
-func MakeDaemon(remoteNoccHosts []string, disableObjCache bool, disableOwnIncludes bool, maxLocalCxxProcesses int64) (*Daemon, error) {
+func MakeDaemon(remoteNoccHosts []string, disableObjCache bool, disableOwnIncludes bool, maxLocalCxxProcesses int64, forceInterruptTimeout time.Duration) (*Daemon, error) {
 	// send env NOCC_SERVERS on connect everywhere
 	// this is for debugging purpose: in production, all clients should have the same servers list
 	// to ensure this, just grep server logs: only one unique string should appear
@@ -93,18 +91,19 @@ func MakeDaemon(remoteNoccHosts []string, disableObjCache bool, disableOwnInclud
 	// env NOCC_SERVERS and others are supposed to be the same between `nocc` invocations
 	// (in practice, this is true, as the first `nocc` invocation has no precedence over any other in a bunch)
 	daemon := &Daemon{
-		startTime:          time.Now(),
-		quitChan:           make(chan int),
-		clientID:           detectClientID(),
-		hostUserName:       detectHostUserName(),
-		remoteConnections:  make([]*RemoteConnection, len(remoteNoccHosts)),
-		allRemotesDelim:    allRemotesDelim,
-		localCxxThrottle:   make(chan struct{}, maxLocalCxxProcesses),
-		disableOwnIncludes: disableOwnIncludes,
-		disableObjCache:    disableObjCache,
-		disableLocalCxx:    maxLocalCxxProcesses == 0,
-		activeInvocations:  make(map[uint32]*Invocation, 300),
-		includesCache:      make(map[string]*IncludesCache, 1),
+		startTime:             time.Now(),
+		quitChan:              make(chan int),
+		clientID:              detectClientID(),
+		hostUserName:          detectHostUserName(),
+		remoteConnections:     make([]*RemoteConnection, len(remoteNoccHosts)),
+		allRemotesDelim:       allRemotesDelim,
+		localCxxThrottle:      make(chan struct{}, maxLocalCxxProcesses),
+		disableOwnIncludes:    disableOwnIncludes,
+		disableObjCache:       disableObjCache,
+		disableLocalCxx:       maxLocalCxxProcesses == 0,
+		activeInvocations:     make(map[uint32]*Invocation, 300),
+		includesCache:         make(map[string]*IncludesCache, 1),
+		forceInterruptTimeout: forceInterruptTimeout,
 	}
 
 	// connect to all remotes in parallel
@@ -316,7 +315,7 @@ func (daemon *Daemon) PeriodicallyInterruptHangedInvocations() {
 		case <-time.After(10 * time.Second):
 			daemon.mu.Lock()
 			for _, invocation := range daemon.activeInvocations {
-				if time.Since(invocation.createTime) > timeoutForceInterruptInvocation {
+				if time.Since(invocation.createTime) > daemon.forceInterruptTimeout {
 					invocation.ForceInterrupt(fmt.Errorf("interrupt sessionID %d (%s) after %d sec timeout", invocation.sessionID, invocation.summary.remoteHost, int(time.Since(invocation.createTime).Seconds())))
 				}
 			}

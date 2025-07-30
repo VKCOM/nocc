@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/VKCOM/nocc/internal/client"
 	"github.com/VKCOM/nocc/internal/common"
@@ -75,6 +76,8 @@ func main() {
 		"", "NOCC_DISABLE_OWN_INCLUDES")
 	localCxxQueueSize := common.CmdEnvInt("Amount of parallel processes when remotes aren't available and cxx is launched locally.\nBy default, it's a number of CPUs on the current machine.", int64(runtime.NumCPU()),
 		"", "NOCC_LOCAL_CXX_QUEUE_SIZE")
+	forceInterruptTimeout := common.CmdEnvDuration("Timeout after how long the daemon will force a connection termination. By default, it's 8 minutes.", 8*time.Minute,
+		"", "NOCC_FORCE_INTERRUPT_TIMEOUT")
 
 	common.ParseCmdFlagsCombiningWithEnv()
 
@@ -128,7 +131,7 @@ func main() {
 			failedStartDaemon(err)
 		}
 
-		daemon, err := client.MakeDaemon(remoteNoccHosts, *disableObjCache, *disableOwnIncludes, *localCxxQueueSize)
+		daemon, err := client.MakeDaemon(remoteNoccHosts, *disableObjCache, *disableOwnIncludes, *localCxxQueueSize, *forceInterruptTimeout)
 		if err != nil {
 			failedStartDaemon(err)
 		}
@@ -157,7 +160,7 @@ func main() {
 		failedStart("no remote hosts set; you should set NOCC_SERVERS or NOCC_SERVERS_FILENAME")
 	}
 
-	exitCode, stdout, stderr := client.EmulateDaemonInsideThisProcessForDev(remoteNoccHosts, os.Args[1:], *disableOwnIncludes, 1)
+	exitCode, stdout, stderr := client.EmulateDaemonInsideThisProcessForDev(remoteNoccHosts, os.Args[1:], *disableOwnIncludes, 1, 8*time.Minute)
 	_, _ = os.Stdout.Write(stdout)
 	_, _ = os.Stderr.Write(stderr)
 	os.Exit(exitCode)

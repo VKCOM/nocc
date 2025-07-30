@@ -18,17 +18,19 @@ type ClientsStorage struct {
 
 	clientsDir string // /tmp/nocc/cpp/clients
 
-	completedCount int64
-	lastPurgeTime  time.Time
+	completedCount       int64
+	lastPurgeTime        time.Time
+	checkInactiveTimeout time.Duration
 
 	uniqueRemotesList map[string]string
 }
 
-func MakeClientsStorage(clientsDir string) (*ClientsStorage, error) {
+func MakeClientsStorage(clientsDir string, checkInactiveTimeout time.Duration) (*ClientsStorage, error) {
 	return &ClientsStorage{
-		table:             make(map[string]*Client, 1024),
-		clientsDir:        clientsDir,
-		uniqueRemotesList: make(map[string]string, 1),
+		table:                make(map[string]*Client, 1024),
+		clientsDir:           clientsDir,
+		uniqueRemotesList:    make(map[string]string, 1),
+		checkInactiveTimeout: checkInactiveTimeout,
 	}, nil
 }
 
@@ -97,7 +99,7 @@ func (allClients *ClientsStorage) DeleteInactiveClients() {
 		var inactiveClient *Client = nil
 		allClients.mu.RLock()
 		for _, client := range allClients.table {
-			if now.Sub(client.lastSeen) > 5*time.Minute {
+			if now.Sub(client.lastSeen) > allClients.checkInactiveTimeout {
 				inactiveClient = client
 				break
 			}

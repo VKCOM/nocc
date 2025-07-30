@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"time"
 )
 
 // LocalCxxLaunch describes an invocation when it's executed locally, not remotely.
@@ -40,8 +41,8 @@ func (localCxx *LocalCxxLaunch) RunCxxLocally() (exitCode int, stdout []byte, st
 
 // EmulateDaemonInsideThisProcessForDev is for dev purposes:
 // for development, I use `nocc-daemon g++ ...` from GoLand directly (without a C++ `nocc` wrapper).
-func EmulateDaemonInsideThisProcessForDev(remoteNoccHosts []string, cmdLine []string, disableOwnIncludes bool, localCxxQueueSize int) (exitCode int, stdout []byte, stderr []byte) {
-	daemon, err := MakeDaemon(remoteNoccHosts, false, disableOwnIncludes, int64(localCxxQueueSize))
+func EmulateDaemonInsideThisProcessForDev(remoteNoccHosts []string, cmdLine []string, disableOwnIncludes bool, localCxxQueueSize int, forceInterruptTimeout time.Duration) (exitCode int, stdout []byte, stderr []byte) {
+	daemon, err := MakeDaemon(remoteNoccHosts, false, disableOwnIncludes, int64(localCxxQueueSize), forceInterruptTimeout)
 	if err != nil {
 		panic(err)
 	}

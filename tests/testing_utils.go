@@ -18,7 +18,7 @@ func createClientAndEmulateDaemonForTesting(cmdLineStr string) (exitCode int, st
 		return
 	}
 
-	exitCode, stdout, stderr = client.EmulateDaemonInsideThisProcessForDev(remoteNoccHosts, cmdLine, false, 0)
+	exitCode, stdout, stderr = client.EmulateDaemonInsideThisProcessForDev(remoteNoccHosts, cmdLine, false, 0, 8*time.Minute)
 	time.Sleep(100 * time.Millisecond) // for all goroutines to finish
 	return
 }

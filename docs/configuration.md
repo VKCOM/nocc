@@ -10,17 +10,18 @@ This page describes how to set up `nocc` and `nocc-server` for production.
 All configuration on a client-side is done using environment variables. 
 That's because `nocc` is by design invoked without self command-line arguments.
 
-| Env variable                     | Description                                                                                                                                                                                                                                                                                           |
-|----------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `NOCC_GO_EXECUTABLE` string      | `/path/to/nocc-daemon` (it's invoked from `nocc`, which is a tiny C++ wrapper).                                                                                                                                                                                                                       |
-| `NOCC_CLIENT_ID` string          | This is a *clientID* sent to all servers when a daemon starts. Setting a sensible value makes server logs much more readable. For CI, you can set this to *b{BUILD_ID}*. For developers containers, you can set this to *"dev-{USERNAME}"*. If not set, a random string is generated on daemon start. |
-| `NOCC_SERVERS` string            | Remote nocc servers — a list of 'host:port' delimited by ';'. If not set, `nocc` will read `NOCC_SERVERS_FILENAME`.                                                                                                                                                                                   |
-| `NOCC_SERVERS_FILENAME` string   | A file with nocc servers — a list of 'host:port', one per line (with optional comments starting with '#'). Used if `NOCC_SERVERS` is unset.                                                                                                                                                           |
-| `NOCC_LOG_FILENAME` string       | A filename to log, nothing by default. Errors are duplicated to stderr always.                                                                                                                                                                                                                        |
-| `NOCC_LOG_VERBOSITY` int         | Logger verbosity level for INFO (-1 off, default 0, max 2). Errors are logged always.                                                                                                                                                                                                                 |
-| `NOCC_DISABLE_OBJ_CACHE` bool    | Disable obj cache on remote: obj will be compiled always and won't be stored.                                                                                                                                                                                                                         |
-| `NOCC_DISABLE_OWN_INCLUDES` bool | Disable [own includes parser](./architecture.md#own-includes-parser): use a C++ preprocessor instead. It's much slower, but 100% works. By default, nocc traverses `#include` recursively using its own built-in parser.                                                                              | 
-| `NOCC_LOCAL_CXX_QUEUE_SIZE` int  | Amount of parallel processes when remotes aren't available and cxx is launched locally. By default, it's the number of CPUs on the current machine.                                                                                                                                                   |
+| Env variable                            | Description                                                                                                                                                                                                                                                                                           |
+|-----------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `NOCC_GO_EXECUTABLE` string             | `/path/to/nocc-daemon` (it's invoked from `nocc`, which is a tiny C++ wrapper).                                                                                                                                                                                                                       |
+| `NOCC_CLIENT_ID` string                 | This is a *clientID* sent to all servers when a daemon starts. Setting a sensible value makes server logs much more readable. For CI, you can set this to *b{BUILD_ID}*. For developers containers, you can set this to *"dev-{USERNAME}"*. If not set, a random string is generated on daemon start. |
+| `NOCC_SERVERS` string                   | Remote nocc servers — a list of 'host:port' delimited by ';'. If not set, `nocc` will read `NOCC_SERVERS_FILENAME`.                                                                                                                                                                                   |
+| `NOCC_SERVERS_FILENAME` string          | A file with nocc servers — a list of 'host:port', one per line (with optional comments starting with '#'). Used if `NOCC_SERVERS` is unset.                                                                                                                                                           |
+| `NOCC_LOG_FILENAME` string              | A filename to log, nothing by default. Errors are duplicated to stderr always.                                                                                                                                                                                                                        |
+| `NOCC_LOG_VERBOSITY` int                | Logger verbosity level for INFO (-1 off, default 0, max 2). Errors are logged always.                                                                                                                                                                                                                 |
+| `NOCC_DISABLE_OBJ_CACHE` bool           | Disable obj cache on remote: obj will be compiled always and won't be stored.                                                                                                                                                                                                                         |
+| `NOCC_DISABLE_OWN_INCLUDES` bool        | Disable [own includes parser](./architecture.md#own-includes-parser): use a C++ preprocessor instead. It's much slower, but 100% works. By default, nocc traverses `#include` recursively using its own built-in parser.                                                                              | 
+| `NOCC_LOCAL_CXX_QUEUE_SIZE` int         | Amount of parallel processes when remotes aren't available and cxx is launched locally. By default, it's the number of CPUs on the current machine.                                                                                                                                                   |
+| `NOCC_FORCE_INTERRUPT_TIMEOUT` duration | Timeout after how long the daemon will force a connection termination. By default, it's 8 minutes.                                                                                                                                                                                                    |
 
 For real usage, you'll definitely have to specify `NOCC_GO_EXECUTABLE` and `NOCC_SERVERS`. It also makes sense of setting `NOCC_CLIENT_ID` and `NOCC_LOG_FILENAME`. Other options are unlikely to be used. 
 
@@ -34,18 +35,19 @@ When you launch lots of jobs like `make -j 600`, then `nocc-daemon` has to maint
 All configuration on a server-side is done using command-line arguments.
 For a server, they are more reliable than environment variables.
 
-| Cmd argument              | Description                                                                             |
-|---------------------------|-----------------------------------------------------------------------------------------|
-| `-host {string}`          | Binding address, default 0.0.0.0.                                                       |
-| `-port {int}`             | Listening port, default 43210.                                                          |
-| `-cpp-dir {string}`       | Directory for incoming C++ files and src cache, default */tmp/nocc/cpp*.                |
-| `-obj-dir {string}`       | Directory for resulting obj files and obj cache, default */tmp/nocc/obj*.               |
-| `-log-filename {string}`  | A filename to log, by default use stderr.                                               |
-| `-log-verbosity {int}`    | Logger verbosity level for INFO (-1 off, default 0, max 2). Errors are logged always.   |
-| `-src-cache-limit {int}`  | Header and source cache limit, in bytes, default 4G.                                    |
-| `-obj-cache-limit {int}`  | Compiled obj cache limit, in bytes, default 16G.                                        |
-| `-statsd {string}`        | Statsd udp address (host:port), omitted by default. If omitted, stats won't be written. |
-| `-max-parallel-cxx {int}` | Max amount of C++ compiler processes launched in parallel, default *nCPU*.              |
+| Cmd argument                         | Description                                                                                                          |
+|--------------------------------------|----------------------------------------------------------------------------------------------------------------------|
+| `-host {string}`                     | Binding address, default 0.0.0.0.                                                                                    |
+| `-port {int}`                        | Listening port, default 43210.                                                                                       |
+| `-cpp-dir {string}`                  | Directory for incoming C++ files and src cache, default */tmp/nocc/cpp*.                                             |
+| `-obj-dir {string}`                  | Directory for resulting obj files and obj cache, default */tmp/nocc/obj*.                                            |
+| `-log-filename {string}`             | A filename to log, by default use stderr.                                                                            |
+| `-log-verbosity {int}`               | Logger verbosity level for INFO (-1 off, default 0, max 2). Errors are logged always.                                |
+| `-src-cache-limit {int}`             | Header and source cache limit, in bytes, default 4G.                                                                 |
+| `-obj-cache-limit {int}`             | Compiled obj cache limit, in bytes, default 16G.                                                                     |
+| `-statsd {string}`                   | Statsd udp address (host:port), omitted by default. If omitted, stats won't be written.                              |
+| `-max-parallel-cxx {int}`            | Max amount of C++ compiler processes launched in parallel, default *nCPU*.                                           |
+| `-check-inactive-timeout {duration}` | The time since the last activity, after which the server will consider the client to be inactive, default 5 minutes. |
 
 All file caches are lost on restart, as references to files are kept in memory. 
 There is also an LRU expiration mechanism to fit cache limits.
