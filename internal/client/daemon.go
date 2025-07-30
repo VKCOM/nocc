@@ -11,6 +11,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -273,15 +274,17 @@ func (daemon *Daemon) FallbackToLocalCxx(req DaemonSockRequest, reason error) Da
 	return reply
 }
 
-func (daemon *Daemon) GetOrCreateIncludesCache(cxxName string) *IncludesCache {
+func (daemon *Daemon) GetOrCreateIncludesCache(cxxName string, cxxArgs []string) *IncludesCache {
+	cxxCacheName := cxxName + strings.Join(cxxArgs, " ")
+
 	daemon.mu.Lock()
-	includesCache := daemon.includesCache[cxxName]
+	includesCache := daemon.includesCache[cxxCacheName]
 	if includesCache == nil {
 		var err error
-		if includesCache, err = MakeIncludesCache(cxxName); err != nil {
+		if includesCache, err = MakeIncludesCache(cxxName, cxxArgs); err != nil {
 			logClient.Error("failed to calc default include dirs for", cxxName, err)
 		}
-		daemon.includesCache[cxxName] = includesCache
+		daemon.includesCache[cxxCacheName] = includesCache
 	}
 	daemon.mu.Unlock()
 	return includesCache
