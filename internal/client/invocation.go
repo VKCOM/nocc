@@ -27,12 +27,13 @@ type Invocation struct {
 	sessionID  uint32    // incremental while a daemon is alive
 
 	// cmdLine is parsed to the following fields:
-	cppInFile  string      // input file as specified in cmd line (.cpp for compilation, .h for pch generation)
-	objOutFile string      // output file as specified in cmd line (.o for compilation, .gch/.pch for pch generation)
-	cxxName    string      // g++ / clang / etc.
-	cxxArgs    []string    // args like -Wall, -fpch-preprocess and many more, except:
-	cxxIDirs   IncludeDirs // -I / -iquote / -isystem go here
-	depsFlags  DepCmdFlags // -MD -MF file and others, used for .d files generation (not passed to server)
+	cppInFile       string      // input file as specified in cmd line (.cpp for compilation, .h for pch generation)
+	objOutFile      string      // output file as specified in cmd line (.o for compilation, .gch/.pch for pch generation)
+	cxxName         string      // g++ / clang / etc.
+	cxxArgs         []string    // args like -Wall, -fpch-preprocess and many more, except:
+	cxxArgsIncludes []string    // TODO
+	cxxIDirs        IncludeDirs // -I / -iquote / -isystem go here
+	depsFlags       DepCmdFlags // -MD -MF file and others, used for .d files generation (not passed to server)
 
 	waitUploads int32 // files still waiting for upload to finish; 0 releases wgUpload; see Invocation.DoneUploadFile
 	doneRecv    int32 // 1 if o file received or failed receiving; 1 releases wgRecv; see Invocation.DoneRecvObj
@@ -73,13 +74,14 @@ func pathAbs(cwd string, relPath string) string {
 
 func ParseCmdLineInvocation(daemon *Daemon, cwd string, cmdLine []string) (invocation *Invocation) {
 	invocation = &Invocation{
-		createTime:    time.Now(),
-		sessionID:     atomic.AddUint32(&daemon.totalInvocations, 1),
-		cxxName:       cmdLine[0],
-		cxxArgs:       make([]string, 0, 10),
-		cxxIDirs:      MakeIncludeDirs(),
-		summary:       MakeInvocationSummary(),
-		includesCache: daemon.GetOrCreateIncludesCache(cmdLine[0]),
+		createTime:      time.Now(),
+		sessionID:       atomic.AddUint32(&daemon.totalInvocations, 1),
+		cxxName:         cmdLine[0],
+		cxxArgs:         make([]string, 0, 10),
+		cxxArgsIncludes: make([]string, 0, 1),
+		cxxIDirs:        MakeIncludeDirs(),
+		summary:         MakeInvocationSummary(),
+		includesCache:   nil, // TODO
 	}
 
 	parseArgFile := func(key string, arg string, argIndex *int) (string, bool) {
@@ -111,6 +113,21 @@ func ParseCmdLineInvocation(daemon *Daemon, cwd string, cmdLine []string) (invoc
 			}
 		}
 		return ""
+	}
+
+	parsePartsArgString := func(arg string, argIndex *int) string {
+		parts := strings.SplitN(arg, "=", 2)
+		if len(parts) == 2 {
+			return parts[1]
+		}
+
+		if *argIndex+1 < len(cmdLine) {
+			*argIndex++
+			return cmdLine[*argIndex]
+		} else {
+			invocation.err = fmt.Errorf("unsupported command-line: no argument after %s", arg)
+			return ""
+		}
 	}
 
 	for i := 1; i < len(cmdLine); i++ {
@@ -183,6 +200,9 @@ func ParseCmdLineInvocation(daemon *Daemon, cwd string, cmdLine []string) (invoc
 				invocation.cxxArgs = append(invocation.cxxArgs, "-Xclang", xArg)
 				i++
 				continue
+			} else if HasPrefixOrEqualOption(arg, "-stdlib") || HasPrefixOrEqualOption(arg, "--stdlib") {
+				invocation.cxxArgsIncludes = append(invocation.cxxArgsIncludes, parsePartsArgString(arg, &i))
+				continue
 			}
 		} else if isSourceFileName(arg) || isHeaderFileName(arg) {
 			if invocation.cppInFile != "" {
@@ -197,6 +217,8 @@ func ParseCmdLineInvocation(daemon *Daemon, cwd string, cmdLine []string) (invoc
 		}
 		invocation.cxxArgs = append(invocation.cxxArgs, arg)
 	}
+
+	invocation.includesCache = daemon.GetOrCreateIncludesCache(invocation.cxxName, invocation.cxxArgsIncludes)
 
 	if invocation.err != nil {
 		return
