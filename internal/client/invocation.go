@@ -115,12 +115,19 @@ func ParseCmdLineInvocation(daemon *Daemon, cwd string, cmdLine []string) (invoc
 		return ""
 	}
 
-	parsePartsArgString := func(arg string) string {
+	parsePartsArgString := func(arg string, argIndex *int) string {
 		parts := strings.SplitN(arg, "=", 2)
-		if len(parts) != 2 {
-			return arg
+		if len(parts) == 2 {
+			return parts[1]
 		}
-		return parts[1]
+
+		if *argIndex+1 < len(cmdLine) {
+			*argIndex++
+			return cmdLine[*argIndex]
+		} else {
+			invocation.err = fmt.Errorf("unsupported command-line: no argument after %s", arg)
+			return ""
+		}
 	}
 
 	for i := 1; i < len(cmdLine); i++ {
@@ -193,8 +200,8 @@ func ParseCmdLineInvocation(daemon *Daemon, cwd string, cmdLine []string) (invoc
 				invocation.cxxArgs = append(invocation.cxxArgs, "-Xclang", xArg)
 				i++
 				continue
-			} else if strings.HasPrefix(arg, "-stdlib=") {
-				invocation.cxxArgsIncludes = append(invocation.cxxArgsIncludes, parsePartsArgString(arg))
+			} else if HasPrefixOrEqualOption(arg, "-stdlib") || HasPrefixOrEqualOption(arg, "--stdlib") {
+				invocation.cxxArgsIncludes = append(invocation.cxxArgsIncludes, parsePartsArgString(arg, &i))
 				continue
 			}
 		} else if isSourceFileName(arg) || isHeaderFileName(arg) {
