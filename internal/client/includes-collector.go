@@ -120,8 +120,12 @@ func CollectDependentIncludesByCxxM(includesCache *IncludesCache, cwd string, cx
 // GetDefaultCxxIncludeDirsOnLocal retrieves default include dirs on a local machine.
 // This is done by -Wp,-v option for a no input file.
 // This result is cached once nocc-daemon is started.
-func GetDefaultCxxIncludeDirsOnLocal(cxxName string) (IncludeDirs, error) {
-	cxxWpCommand := exec.Command(cxxName, "-Wp,-v", "-x", "c++", "/dev/null", "-fsyntax-only")
+func GetDefaultCxxIncludeDirsOnLocal(cxxName string, cxxArgs []string) (IncludeDirs, error) {
+	cxxCmdLine := make([]string, 0, len(cxxArgs)+5)
+	cxxCmdLine = append(cxxCmdLine, cxxArgs...)
+	cxxCmdLine = append(cxxCmdLine, "-Wp,-v", "-x", "c++", "/dev/null", "-fsyntax-only")
+
+	cxxWpCommand := exec.Command(cxxName, cxxCmdLine...)
 	var cxxWpStderr bytes.Buffer
 	cxxWpCommand.Stderr = &cxxWpStderr
 	if err := cxxWpCommand.Run(); err != nil {
