@@ -127,7 +127,9 @@ void start_daemon_in_background() {
   }
 
   int pipd[2];
-  pipe(pipd);
+  if (pipe(pipd) == -1) {
+    execute_cxx_locally("could not start daemon", errno);
+  };
 
   int pid = fork();
   if (pid < 0) {
