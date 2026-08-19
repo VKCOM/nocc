@@ -11,6 +11,7 @@ import (
 	"github.com/VKCOM/nocc/internal/server"
 	"github.com/VKCOM/nocc/pb"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 )
 
 func failedStart(message string, err error) {
@@ -132,7 +133,19 @@ func main() {
 		failedStart("Failed to init pch compilation", err)
 	}
 
-	s.GRPCServer = grpc.NewServer()
+	// Keepalive, so an idle stream is not silently evicted by a NAT/conntrack table
+	// in between. Values are shared with the client dial options; the two sides must
+	// stay compatible, see internal/common/keepalive.go.
+	s.GRPCServer = grpc.NewServer(
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             common.KeepaliveMinTime,
+			PermitWithoutStream: common.KeepalivePermitWithoutStream,
+		}),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    common.KeepaliveTime,
+			Timeout: common.KeepaliveTimeout,
+		}),
+	)
 	pb.RegisterCompilationServiceServer(s.GRPCServer, s)
 
 	s.Cron, err = server.MakeCron(s)
