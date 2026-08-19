@@ -104,6 +104,18 @@ func Test_MDMTMFMPMMD(t *testing.T) {
 	runGccWithNoccAndCompareOutputDepfiles(t, cmdLineStr, "dt/dep1", "dt/dep1/1.cpp.o.d")
 }
 
+// -MMD with no -MD and no -MF. Every other case here also passes -MD, which is
+// what kept ShouldGenerateDepFile() true; on its own, -MMD produced no .d at all.
+func Test_MMDMP(t *testing.T) {
+	var cmdLineStr = "g++ -MMD -MP -o dt/dep1/1.cpp.o -c dt/dep1/1.cpp"
+	runGccWithNoccAndCompareOutputDepfiles(t, cmdLineStr, "dt/dep1", "dt/dep1/1.cpp.d")
+}
+
+func Test_MMDOnly(t *testing.T) {
+	var cmdLineStr = "g++ -MMD -o dt/dep1/1.cpp.o -c dt/dep1/1.cpp"
+	runGccWithNoccAndCompareOutputDepfiles(t, cmdLineStr, "dt/dep1", "dt/dep1/1.cpp.d")
+}
+
 func Test_MDMF(t *testing.T) {
 	var cmdLineStr = "g++ -MD -MF dt/dep1/1.cpp.o.d -o../tests/dt/dep1/1111.cpp.o ../tests/./dt/dep1/1.cpp"
 	runGccWithNoccAndCompareOutputDepfiles(t, cmdLineStr, "dt/dep1", "dt/dep1/1.cpp.o.d")
