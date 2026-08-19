@@ -124,7 +124,7 @@ func (fr *FilesReceiving) monitorRemoteStreamForObjReceiving(stream pb.Compilati
 			continue
 		}
 
-		err, needRecreateStream := receiveObjFileByChunks(stream, firstChunk, invocation.objOutFile)
+		err, needRecreateStream := receiveObjFileByChunks(stream, firstChunk, invocation.GetObjOutFileAbs())
 		invocation.DoneRecvObj(err)
 
 		// recreate a stream if it's corrupted, like chunks mismatch

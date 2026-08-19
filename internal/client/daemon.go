@@ -211,7 +211,7 @@ func (daemon *Daemon) HandleInvocation(req DaemonSockRequest) DaemonSockResponse
 		logClient.Info(0, "saved pch file", fileSize, "bytes to", ownPch.OwnPchFile)
 
 		if !daemon.areAllRemotesAvailable() {
-			logClient.Info(0, "compiling real pch file for future local compilations", invocation.objOutFile)
+			logClient.Info(0, "compiling real pch file for future local compilations", invocation.GetObjOutFileAbs())
 			return daemon.FallbackToLocalCxx(req, nil)
 		}
 

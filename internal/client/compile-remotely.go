@@ -78,7 +78,7 @@ func CompileCppRemotely(daemon *Daemon, cwd string, invocation *Invocation, remo
 		logClient.Info(0, "remote C++ compiler exited with code", exitCode, "sessionID", invocation.sessionID, invocation.cppInFile, remote.remoteHost)
 		logClient.Info(1, "cxxExitCode:", exitCode, "sessionID", invocation.sessionID, "\ncxxStdout:", strings.TrimSpace(string(invocation.cxxStdout)), "\ncxxStderr:", strings.TrimSpace(string(invocation.cxxStderr)))
 	} else {
-		logClient.Info(2, "saved obj file to", invocation.objOutFile)
+		logClient.Info(2, "saved obj file to", invocation.GetObjOutFileAbs())
 	}
 	return
 }

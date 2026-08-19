@@ -11,10 +11,13 @@ import (
 // This file is later discovered as a dependency, and after being uploaded, is compiled to real .gch/.pch on remote.
 // See comments above common.OwnPch.
 func GenerateOwnPch(daemon *Daemon, cwd string, invocation *Invocation) (*common.OwnPch, error) {
+	// all three are absolute: OwnPchFile is written here on the client, and the server maps
+	// OrigHFile/OrigPchFile into its per-pch root dir by concatenating them onto rootDir
+	objOutFileAbs := invocation.GetObjOutFileAbs()
 	ownPch := &common.OwnPch{
-		OwnPchFile:  common.ReplaceFileExt(invocation.objOutFile, ".nocc-pch"),
-		OrigHFile:   invocation.cppInFile,
-		OrigPchFile: invocation.objOutFile,
+		OwnPchFile:  common.ReplaceFileExt(objOutFileAbs, ".nocc-pch"),
+		OrigHFile:   invocation.GetCppInFileAbs(cwd),
+		OrigPchFile: objOutFileAbs,
 		CxxName:     invocation.cxxName,
 		CxxArgs:     invocation.cxxArgs,
 		CxxIDirs:    append(invocation.cxxIDirs.AsCxxArgs(), invocation.includesCache.cxxDefIDirs.AsCxxArgs()...),

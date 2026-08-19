@@ -1,7 +1,6 @@
 package client
 
 import (
-	"os"
 	"path"
 	"strings"
 
@@ -115,9 +114,9 @@ func (deps *DepCmdFlags) calcOutputDepFileName(invocation *Invocation) string {
 	// > If it is, the driver uses its argument but with a suffix of .d,
 	// > otherwise ... (it's not applicable to nocc, as it requires -o anyway)
 	if invocation.objOutFile != "" {
-		return common.ReplaceFileExt(invocation.objOutFile, ".d")
+		return common.ReplaceFileExt(invocation.GetObjOutFileAbs(), ".d")
 	}
-	return common.ReplaceFileExt(path.Base(invocation.cppInFile), ".d")
+	return pathAbs(invocation.cwd, common.ReplaceFileExt(path.Base(invocation.cppInFile), ".d"))
 }
 
 // calcDepListFromHFiles fills DepFileTarget.TargetDepList
@@ -126,7 +125,9 @@ func (deps *DepCmdFlags) calcDepListFromHFiles(invocation *Invocation, hFiles []
 		hFiles = deps.filterOutSystemHFiles(invocation.includesCache.cxxDefIDirs, hFiles)
 	}
 
-	processPwd, _ := os.Getwd()
+	// paths in a depfile are relative to the DIRECTORY MAKE RAN THE COMPILER IN, which is the
+	// client's cwd — not the daemon's (it serves every build directory on the machine)
+	processPwd := invocation.cwd
 	if !strings.HasSuffix(processPwd, "/") {
 		processPwd += "/"
 	}

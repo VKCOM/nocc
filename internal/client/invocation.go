@@ -26,6 +26,11 @@ type Invocation struct {
 	createTime time.Time // used for local timeout
 	sessionID  uint32    // incremental while a daemon is alive
 
+	// cwd of the `nocc` client that issued this invocation. Every relative path on the cmd line is
+	// relative to THIS, never to the daemon's own process cwd: the daemon is long-lived and serves
+	// invocations from many directories, so os.Getwd() inside it is meaningless (and silently wrong).
+	cwd string
+
 	// cmdLine is parsed to the following fields:
 	cppInFile  string      // input file as specified in cmd line (.cpp for compilation, .h for pch generation)
 	objOutFile string      // output file as specified in cmd line (.o for compilation, .gch/.pch for pch generation)
@@ -65,7 +70,7 @@ func isHeaderFileName(fileName string) bool {
 }
 
 func pathAbs(cwd string, relPath string) string {
-	if relPath[0] == '/' {
+	if relPath == "" || relPath[0] == '/' {
 		return relPath
 	}
 	return filepath.Join(cwd, relPath)
@@ -73,6 +78,7 @@ func pathAbs(cwd string, relPath string) string {
 
 func ParseCmdLineInvocation(daemon *Daemon, cwd string, cmdLine []string) (invocation *Invocation) {
 	invocation = &Invocation{
+		cwd:           cwd,
 		createTime:    time.Now(),
 		sessionID:     atomic.AddUint32(&daemon.totalInvocations, 1),
 		cxxName:       cmdLine[0],
@@ -239,6 +245,14 @@ func (invocation *Invocation) GetCppInFileAbs(cwd string) string {
 		return invocation.cppInFile
 	}
 	return cwd + "/" + invocation.cppInFile
+}
+
+// GetObjOutFileAbs returns an absolute path to invocation.objOutFile.
+// (remember, that it's stored as-is from cmd line — typically relative, like "src/1.o")
+// Anything that actually touches the file system must use this, not objOutFile: the daemon's
+// cwd is wherever it happened to be started, which is rarely the caller's build directory.
+func (invocation *Invocation) GetObjOutFileAbs() string {
+	return pathAbs(invocation.cwd, invocation.objOutFile)
 }
 
 func (invocation *Invocation) DoneRecvObj(err error) {
