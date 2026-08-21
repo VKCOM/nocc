@@ -11,6 +11,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -140,7 +141,12 @@ func (daemon *Daemon) ServeUntilNobodyAlive() {
 
 	var rLimit syscall.Rlimit
 	_ = syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit)
-	logClient.Info(0, "env:", "clientID", daemon.clientID, "; user", daemon.hostUserName, "; num servers", len(daemon.remoteConnections), "; ulimit -n", rLimit.Cur, "; num cpu", runtime.NumCPU(), "; version", common.GetVersion())
+	remoteHostPorts := make([]string, 0, len(daemon.remoteConnections))
+	for _, remote := range daemon.remoteConnections {
+		remoteHostPorts = append(remoteHostPorts, remote.remoteHostPort)
+	}
+	// log the servers, not just their count: with mdns discovery on, the list isn't in any config file
+	logClient.Info(0, "env:", "clientID", daemon.clientID, "; user", daemon.hostUserName, "; servers", strings.Join(remoteHostPorts, ","), "; num servers", len(daemon.remoteConnections), "; ulimit -n", rLimit.Cur, "; num cpu", runtime.NumCPU(), "; version", common.GetVersion())
 
 	go daemon.PeriodicallyInterruptHangedInvocations()
 	go daemon.listener.StartAcceptingConnections(daemon)
@@ -222,7 +228,7 @@ func (daemon *Daemon) HandleInvocation(req DaemonSockRequest) DaemonSockResponse
 
 	case invokedForCompilingCpp:
 		if len(daemon.remoteConnections) == 0 {
-			return daemon.FallbackToLocalCxx(req, fmt.Errorf("no remote hosts set; use NOCC_SERVERS env var to provide servers"))
+			return daemon.FallbackToLocalCxx(req, fmt.Errorf("no remote hosts set; use NOCC_SERVERS env var or NOCC_DISCOVER_MDNS to provide servers"))
 		}
 
 		remote := daemon.chooseRemoteConnectionForCppCompilation(invocation.cppInFile)

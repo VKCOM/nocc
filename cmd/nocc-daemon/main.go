@@ -10,6 +10,7 @@ import (
 
 	"github.com/VKCOM/nocc/internal/client"
 	"github.com/VKCOM/nocc/internal/common"
+	"github.com/VKCOM/nocc/internal/discovery"
 )
 
 func failedStart(err interface{}) {
@@ -51,6 +52,25 @@ func parseNoccServersEnv(envNoccServers string) (remoteNoccHosts []string) {
 	return
 }
 
+// browseNoccServers looks for servers announcing themselves on the LAN.
+// Discovery never fails a build: if the network says nothing (or says something broken),
+// the caller continues with whatever was configured statically — possibly nothing, which
+// the callers below already handle.
+func browseNoccServers(timeout time.Duration, cacheTTL time.Duration, printFound bool) []discovery.ServerInfo {
+	found, err := discovery.BrowseCached(timeout, cacheTTL, discovery.DefaultCachePath())
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "[nocc] mdns discovery failed:", err)
+		return nil
+	}
+
+	if printFound {
+		for _, info := range found {
+			_, _ = fmt.Fprintln(os.Stderr, "[nocc] discovered", info)
+		}
+	}
+	return found
+}
+
 func main() {
 	showVersionAndExit := common.CmdEnvBool("Show version and exit.", false,
 		"version", "")
@@ -64,6 +84,14 @@ func main() {
 		"drop-server-caches", "")
 	noccServers := common.CmdEnvString("Remote nocc servers — a list of 'host:port' delimited by ';'.\nIf not set, nocc will read NOCC_SERVERS_FILENAME.", "",
 		"", "NOCC_SERVERS")
+	discoverMdns := common.CmdEnvBool("Discover nocc servers on the local network over mDNS/DNS-SD ('_nocc._tcp'),\nin addition to NOCC_SERVERS. Servers must be launched with -advertise-mdns.", false,
+		"discover-mdns", "NOCC_DISCOVER_MDNS")
+	printDiscoveredServers := common.CmdEnvBool("Discover nocc servers over mDNS, print them as 'host:port' lines and exit.\nFor scripts that build a server list (the daemon's own discovery is NOCC_DISCOVER_MDNS).", false,
+		"print-discovered-servers", "")
+	discoverTimeout := common.CmdEnvDuration("How long to wait for mDNS answers when discovering servers. By default, it's 500ms.", 500*time.Millisecond,
+		"", "NOCC_DISCOVER_TIMEOUT")
+	discoverCacheTTL := common.CmdEnvDuration("How long a discovery result is reused before browsing the network again, 0 to disable.\nBy default, it's 1 minute.", time.Minute,
+		"", "NOCC_DISCOVER_CACHE_TTL")
 	noccServersFilename := common.CmdEnvString("A file with nocc servers — a list of 'host:port', one per line (with optional comments starting with '#').\nUsed if NOCC_SERVERS is unset.", "",
 		"", "NOCC_SERVERS_FILENAME")
 	logFileName := common.CmdEnvString("A filename to log, nothing by default.\nErrors are duplicated to stderr always.", "",
@@ -88,28 +116,47 @@ func main() {
 		remoteNoccHosts = readNoccServersFile(*noccServersFilename)
 	}
 
+	if *discoverMdns || *printDiscoveredServers {
+		cacheTTL := *discoverCacheTTL
+		if *printDiscoveredServers {
+			cacheTTL = 0 // a script asking what's on the network right now wants a live answer, not a cached one
+		}
+		// `-check-servers` is the command people run to find out what discovery sees, so let it be verbose
+		found := browseNoccServers(*discoverTimeout, cacheTTL, *checkServersAndExit)
+
+		if *printDiscoveredServers {
+			for _, info := range found {
+				fmt.Println(info.HostPort)
+			}
+			os.Exit(0)
+		}
+		remoteNoccHosts = discovery.MergeWithStaticHosts(remoteNoccHosts, found)
+	}
+
 	if *showVersionAndExit || *showVersionAndExitShort {
 		fmt.Println(common.GetVersion())
 		os.Exit(0)
 	}
 
 	if *checkServersAndExit {
-		if len(os.Args) == 3 { // nocc -check-servers {remoteHostPort}
+		// nocc -check-servers {remoteHostPort} checks one server instead of the configured list;
+		// os.Args[2] is only a host if it isn't another flag (`-check-servers -discover-mdns`)
+		if len(os.Args) == 3 && !strings.HasPrefix(os.Args[2], "-") {
 			remoteNoccHosts = []string{os.Args[2]}
 		}
 		if len(remoteNoccHosts) == 0 {
-			failedStart("no remote hosts set; you should set NOCC_SERVERS or NOCC_SERVERS_FILENAME")
+			failedStart("no remote hosts set; you should set NOCC_SERVERS or NOCC_SERVERS_FILENAME (or enable NOCC_DISCOVER_MDNS)")
 		}
 		client.RequestRemoteStatus(remoteNoccHosts)
 		os.Exit(0)
 	}
 
 	if *dumpServerLogsAndExit {
-		if len(os.Args) == 3 { // nocc -dump-server-logs {remoteHostPort}
+		if len(os.Args) == 3 && !strings.HasPrefix(os.Args[2], "-") { // nocc -dump-server-logs {remoteHostPort}
 			remoteNoccHosts = []string{os.Args[2]}
 		}
 		if len(remoteNoccHosts) == 0 {
-			failedStart("no remote hosts set; you should set NOCC_SERVERS or NOCC_SERVERS_FILENAME")
+			failedStart("no remote hosts set; you should set NOCC_SERVERS or NOCC_SERVERS_FILENAME (or enable NOCC_DISCOVER_MDNS)")
 		}
 		client.RequestRemoteDumpLogs(remoteNoccHosts, "/tmp/nocc-dump-logs")
 		os.Exit(0)
@@ -117,7 +164,7 @@ func main() {
 
 	if *dropServerCachesAndExit {
 		if len(remoteNoccHosts) == 0 {
-			failedStart("no remote hosts set; you should set NOCC_SERVERS or NOCC_SERVERS_FILENAME")
+			failedStart("no remote hosts set; you should set NOCC_SERVERS or NOCC_SERVERS_FILENAME (or enable NOCC_DISCOVER_MDNS)")
 		}
 		client.RequestDropAllCaches(remoteNoccHosts)
 		os.Exit(0)
@@ -157,7 +204,7 @@ func main() {
 	}
 
 	if len(remoteNoccHosts) == 0 {
-		failedStart("no remote hosts set; you should set NOCC_SERVERS or NOCC_SERVERS_FILENAME")
+		failedStart("no remote hosts set; you should set NOCC_SERVERS or NOCC_SERVERS_FILENAME (or enable NOCC_DISCOVER_MDNS)")
 	}
 
 	exitCode, stdout, stderr := client.EmulateDaemonInsideThisProcessForDev(remoteNoccHosts, os.Args[1:], *disableOwnIncludes, 1, 8*time.Minute)

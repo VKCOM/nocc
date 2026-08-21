@@ -42,7 +42,8 @@ All other cases fall back to local compilation.
 `nocc-server` is a background process running on every compilation node. 
 It handles compilation, stores caches, and writes statistics. 
 
-When `nocc-daemon` starts, it connects to all servers enumerated in the `NOCC_SERVERS` env var. 
+When `nocc-daemon` starts, it connects to all servers enumerated in the `NOCC_SERVERS` env var
+(optionally extended with servers found over mDNS, [see](./configuration.md#server-auto-discovery) `NOCC_DISCOVER_MDNS`). 
 For a server, a launched daemon is **a client**, with a unique *clientID* 
 ([see](./configuration.md#configuring-nocc-client) `NOCC_CLIENT_ID`). 
 

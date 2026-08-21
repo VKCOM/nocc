@@ -3,12 +3,14 @@ module github.com/VKCOM/nocc
 go 1.20
 
 require (
+	github.com/libp2p/zeroconf/v2 v2.2.0
 	google.golang.org/grpc v1.58.0
 	google.golang.org/protobuf v1.31.0
 )
 
 require (
 	github.com/golang/protobuf v1.5.3 // indirect
+	github.com/miekg/dns v1.1.43 // indirect
 	golang.org/x/net v0.12.0 // indirect
 	golang.org/x/sys v0.10.0 // indirect
 	golang.org/x/text v0.11.0 // indirect

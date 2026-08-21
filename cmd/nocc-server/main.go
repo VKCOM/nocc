@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/VKCOM/nocc/internal/common"
+	"github.com/VKCOM/nocc/internal/discovery"
 	"github.com/VKCOM/nocc/internal/server"
 	"github.com/VKCOM/nocc/pb"
 	"google.golang.org/grpc"
@@ -79,6 +80,10 @@ func main() {
 		"statsd", "")
 	maxParallelCxx := common.CmdEnvInt("Max amount of C++ compiler processes launched in parallel, other ready sessions are waiting in a queue.\nBy default, it's a number of CPUs on the current machine.", int64(runtime.NumCPU()),
 		"max-parallel-cxx", "")
+	advertiseMdns := common.CmdEnvBool("Advertise this server on the local network via mDNS/DNS-SD as '_nocc._tcp', so that\nclients launched with -discover-mdns find it without a static NOCC_SERVERS list.", false,
+		"advertise-mdns", "NOCC_SERVER_ADVERTISE_MDNS")
+	advertiseName := common.CmdEnvString("An instance name to advertise with -advertise-mdns, the hostname by default.", "",
+		"advertise-name", "NOCC_SERVER_ADVERTISE_NAME")
 	checkInactiveTimeout := common.CmdEnvDuration("The time since the last activity, after which the server will consider the client to be inactive. By default, it's 5 minutes.", 5*time.Minute,
 		"check-inactive-timeout", "")
 
@@ -142,6 +147,16 @@ func main() {
 
 	if common.GetVersion() == "docker" {
 		printDockerContainerIP()
+	}
+
+	if *advertiseMdns {
+		// advertise only after everything above initialized: a client that finds us
+		// must find a server that can already accept a compilation session
+		advertiser, err := discovery.Advertise(*advertiseName, int(*listenPort))
+		if err != nil {
+			failedStart("Failed to advertise over mdns", err)
+		}
+		defer advertiser.Shutdown()
 	}
 
 	listener, err := s.StartGRPCListening(fmt.Sprintf("%s:%d", *bindHost, *listenPort))
