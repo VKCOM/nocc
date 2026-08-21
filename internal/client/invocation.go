@@ -30,6 +30,7 @@ type Invocation struct {
 	cppInFile  string      // input file as specified in cmd line (.cpp for compilation, .h for pch generation)
 	objOutFile string      // output file as specified in cmd line (.o for compilation, .gch/.pch for pch generation)
 	cxxName    string      // g++ / clang / etc.
+	cxxTriplet string      // what cxxName targets here (`cxx -dumpmachine`), so a server can refuse a mismatch
 	cxxArgs    []string    // args like -Wall, -fpch-preprocess and many more, except:
 	cxxIDirs   IncludeDirs // -I / -iquote / -isystem go here
 	depsFlags  DepCmdFlags // -MD -MF file and others, used for .d files generation (not passed to server)
@@ -80,6 +81,7 @@ func ParseCmdLineInvocation(daemon *Daemon, cwd string, cmdLine []string) (invoc
 		cxxIDirs:      MakeIncludeDirs(),
 		summary:       MakeInvocationSummary(),
 		includesCache: daemon.GetOrCreateIncludesCache(cmdLine[0]),
+		cxxTriplet:    daemon.GetCxxTargetTriplet(cmdLine[0]),
 	}
 
 	parseArgFile := func(key string, arg string, argIndex *int) (string, bool) {

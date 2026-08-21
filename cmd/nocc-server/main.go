@@ -112,6 +112,8 @@ func main() {
 		failedStart("Failed to init cxx launcher", err)
 	}
 
+	s.CxxCapability = server.MakeCxxCapabilityCache()
+
 	s.SystemHeaders, err = server.MakeSystemHeadersCache()
 	if err != nil {
 		failedStart("Failed to init system headers hashtable", err)

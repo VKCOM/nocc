@@ -37,6 +37,7 @@ type NoccServer struct {
 
 	ActiveClients  *ClientsStorage
 	CxxLauncher    *CxxLauncher
+	CxxCapability  *CxxCapabilityCache
 	PchCompilation *PchCompilation
 
 	SystemHeaders *SystemHeadersCache
@@ -109,6 +110,14 @@ func (s *NoccServer) StartCompilationSession(_ context.Context, in *pb.StartComp
 		atomic.AddInt64(&s.Stats.clientsUnauthenticated, 1)
 		logServer.Error("unauthenticated client on session start", "clientID", in.ClientID)
 		return nil, status.Errorf(codes.Unauthenticated, "clientID %s not found; probably, the server was restarted just now", in.ClientID)
+	}
+
+	// refuse before anything is uploaded if this server can't be the compiler the client asked for:
+	// the client then falls back (locally, or to another server) instead of receiving wrong objects
+	if err := s.CxxCapability.CheckCompilerMatchesClient(in.CxxName, in.CxxTargetTriplet); err != nil {
+		atomic.AddInt64(&s.Stats.sessionsFailedOpen, 1)
+		logServer.Error("refused session", "clientID", in.ClientID, "sessionID", in.SessionID, err)
+		return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
 	}
 
 	session, err := client.CreateNewSession(in)

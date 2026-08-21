@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/VKCOM/nocc/internal/common"
 	"github.com/VKCOM/nocc/pb"
@@ -18,6 +19,11 @@ type RemoteConnection struct {
 	remoteHostPort string
 	remoteHost     string // for console output and logs, just IP is more pretty
 	isUnavailable  bool
+
+	// compilers this remote has refused to be (a missing toolchain, or a name that resolves to
+	// a different target there). Set once, then this remote is skipped for that compiler:
+	// a build shouldn't rediscover the same mismatch on every file.
+	incapableCxxNames sync.Map // map[cxxName] => reason string
 
 	grpcClient     *GRPCClient
 	filesUploading *FilesUploading
@@ -76,6 +82,22 @@ func MakeRemoteConnection(daemon *Daemon, remoteHostPort string, ctxWithTimeout 
 	return remote, nil
 }
 
+// MarkIncapableOfCxx remembers that this remote can't act as cxxName.
+func (remote *RemoteConnection) MarkIncapableOfCxx(cxxName string, reason string) {
+	if _, alreadyKnown := remote.incapableCxxNames.LoadOrStore(cxxName, reason); !alreadyKnown {
+		logClient.Error("remote", remote.remoteHost, "can't compile with", cxxName+":", reason)
+	}
+}
+
+// CanCompileWithCxx reports whether it's worth sending a cxxName compilation here.
+func (remote *RemoteConnection) CanCompileWithCxx(cxxName string) bool {
+	if remote.isUnavailable {
+		return false
+	}
+	_, isIncapable := remote.incapableCxxNames.Load(cxxName)
+	return !isIncapable
+}
+
 // StartCompilationSession starts a session on the remote:
 // one `nocc` Invocation for cpp compilation == one server.Session, by design.
 // As an input, we send metadata about all dependencies needed for a .cpp to be compiled (.h/.nocc-pch/etc.).
@@ -88,14 +110,15 @@ func (remote *RemoteConnection) StartCompilationSession(invocation *Invocation, 
 	startSessionReply, err := remote.grpcClient.pb.StartCompilationSession(
 		remote.grpcClient.callContext,
 		&pb.StartCompilationSessionRequest{
-			ClientID:      remote.clientID,
-			SessionID:     invocation.sessionID,
-			Cwd:           cwd,
-			CppInFile:     invocation.cppInFile,
-			CxxName:       invocation.cxxName,
-			CxxArgs:       invocation.cxxArgs,
-			CxxIDirs:      append(invocation.cxxIDirs.AsCxxArgs(), invocation.includesCache.cxxDefIDirs.AsCxxArgs()...),
-			RequiredFiles: requiredFiles,
+			ClientID:         remote.clientID,
+			SessionID:        invocation.sessionID,
+			Cwd:              cwd,
+			CppInFile:        invocation.cppInFile,
+			CxxName:          invocation.cxxName,
+			CxxTargetTriplet: invocation.cxxTriplet,
+			CxxArgs:          invocation.cxxArgs,
+			CxxIDirs:         append(invocation.cxxIDirs.AsCxxArgs(), invocation.includesCache.cxxDefIDirs.AsCxxArgs()...),
+			RequiredFiles:    requiredFiles,
 		})
 	if err != nil {
 		return nil, err

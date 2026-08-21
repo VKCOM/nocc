@@ -48,6 +48,10 @@ message StartCompilationSessionRequest {
     repeated string CxxArgs = 12;
     repeated string CxxIDirs = 13;
     repeated FileMetadata RequiredFiles = 14;
+    // the target triplet of the client's compiler (`cxx -dumpmachine`), empty if it couldn't be detected.
+    // the server refuses the session unless its own CxxName targets the same triplet: otherwise it would
+    // silently return objects of a foreign architecture, which only surfaces much later, at link time
+    string CxxTargetTriplet = 15;
 }
 
 message StartCompilationSessionReply {
