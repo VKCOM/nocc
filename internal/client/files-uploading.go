@@ -51,7 +51,7 @@ func (fu *FilesUploading) RecreateUploadStreamOrQuit(failedStreamCancelFunc cont
 	time.Sleep(100 * time.Millisecond)
 
 	if err := fu.CreateUploadStream(); err != nil {
-		fu.daemon.OnRemoteBecameUnavailable(fu.grpcClient.remoteHostPort, err)
+		fu.daemon.OnRemoteBecameUnavailable(fu.grpcClient, err)
 	}
 }
 
@@ -73,6 +73,9 @@ func (fu *FilesUploading) monitorClientChanForFileUploading(stream pb.Compilatio
 		case <-fu.daemon.quitChan:
 			return
 
+		case <-fu.grpcClient.callContext.Done(): // this connection was replaced by a reconnect
+			return
+
 		case req := <-fu.chanToUpload:
 			logClient.Info(2, "start uploading", req.file.FileSize, req.file.ClientFileName)
 			if req.file.FileSize > 64*1024 {
@@ -91,12 +94,16 @@ func (fu *FilesUploading) monitorClientChanForFileUploading(stream pb.Compilatio
 				default:
 					break
 				}
+				if fu.grpcClient.IsCleared() {
+					req.invocation.DoneUploadFile(err)
+					return
+				}
 
 				// if something goes completely wrong and stream recreation fails, mark this remote as unavailable
 				// see FilesReceiving for a comment about this error code
 				if st, ok := status.FromError(err); ok {
 					if st.Code() == codes.Unauthenticated {
-						fu.daemon.OnRemoteBecameUnavailable(fu.grpcClient.remoteHostPort, err)
+						fu.daemon.OnRemoteBecameUnavailable(fu.grpcClient, err)
 						return
 					}
 				}

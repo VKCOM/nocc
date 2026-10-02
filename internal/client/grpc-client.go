@@ -38,14 +38,15 @@ func MakeGRPCClient(remoteHostPort string) (*GRPCClient, error) {
 	}, nil
 }
 
+// Clear closes the connection. The fields stay set: stream goroutines of a replaced connection may still
+// be running, and they find out they're done by calls failing and callContext being canceled, see IsCleared.
 func (grpcClient *GRPCClient) Clear() {
-	if grpcClient.connection != nil {
+	if grpcClient != nil {
 		grpcClient.cancelFunc()
 		_ = grpcClient.connection.Close()
-
-		grpcClient.connection = nil
-		grpcClient.callContext = nil
-		grpcClient.cancelFunc = nil
-		grpcClient.pb = nil
 	}
+}
+
+func (grpcClient *GRPCClient) IsCleared() bool {
+	return grpcClient.callContext.Err() != nil
 }

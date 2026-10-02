@@ -23,13 +23,15 @@ type Invocation struct {
 	invokeType int   // one of the constants above
 	err        error // any error occurred while parsing/uploading/compiling/receiving
 
-	createTime time.Time // used for local timeout
-	sessionID  uint32    // incremental while a daemon is alive
+	createTime time.Time         // used for local timeout
+	sessionID  uint32            // incremental while a daemon is alive
+	remote     *RemoteConnection // where it's being compiled, so a remote going down interrupts it
 
 	// cmdLine is parsed to the following fields:
 	cppInFile  string      // input file as specified in cmd line (.cpp for compilation, .h for pch generation)
 	objOutFile string      // output file as specified in cmd line (.o for compilation, .gch/.pch for pch generation)
 	cxxName    string      // g++ / clang / etc.
+	cxxTriplet string      // what cxxName targets here (`cxx -dumpmachine`), so a server can refuse a mismatch
 	cxxArgs    []string    // args like -Wall, -fpch-preprocess and many more, except:
 	cxxIDirs   IncludeDirs // -I / -iquote / -isystem go here
 	depsFlags  DepCmdFlags // -MD -MF file and others, used for .d files generation (not passed to server)
@@ -80,6 +82,7 @@ func ParseCmdLineInvocation(daemon *Daemon, cwd string, cmdLine []string) (invoc
 		cxxIDirs:      MakeIncludeDirs(),
 		summary:       MakeInvocationSummary(),
 		includesCache: daemon.GetOrCreateIncludesCache(cmdLine[0]),
+		cxxTriplet:    daemon.GetCxxTargetTriplet(cmdLine[0]),
 	}
 
 	parseArgFile := func(key string, arg string, argIndex *int) (string, bool) {
@@ -254,8 +257,18 @@ func (invocation *Invocation) DoneUploadFile(err error) {
 	if err != nil {
 		invocation.err = err
 	}
-	atomic.AddInt32(&invocation.waitUploads, -1)
-	invocation.wgUpload.Done() // will end up after all required files uploaded/failed
+	// an upload can complete concurrently with ForceInterrupt draining the counter;
+	// never let the two together release wgUpload more times than it was added
+	for {
+		waitUploads := atomic.LoadInt32(&invocation.waitUploads)
+		if waitUploads <= 0 {
+			return
+		}
+		if atomic.CompareAndSwapInt32(&invocation.waitUploads, waitUploads, waitUploads-1) {
+			invocation.wgUpload.Done() // will end up after all required files uploaded/failed
+			return
+		}
+	}
 }
 
 func (invocation *Invocation) ForceInterrupt(err error) {

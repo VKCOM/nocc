@@ -76,6 +76,10 @@ func main() {
 		"", "NOCC_DISABLE_OWN_INCLUDES")
 	localCxxQueueSize := common.CmdEnvInt("Amount of parallel processes when remotes aren't available and cxx is launched locally.\nBy default, it's a number of CPUs on the current machine.", int64(runtime.NumCPU()),
 		"", "NOCC_LOCAL_CXX_QUEUE_SIZE")
+	remoteRetries := common.CmdEnvInt("How many more times a compilation that failed on the network or a server is retried on the pool of servers\nbefore falling back to local cxx (or failing, see NOCC_DISABLE_LOCAL_FALLBACK). Retries wait 1s, 2s, 4s, 8s, then 10s each. By default, 0.", 0,
+		"", "NOCC_REMOTE_RETRIES")
+	disableLocalFallback := common.CmdEnvBool("Fail a compilation that couldn't be done remotely, instead of compiling it locally.\nFor slow clients, where a burst of local compilations is worse than a failed build.", false,
+		"", "NOCC_DISABLE_LOCAL_FALLBACK")
 	forceInterruptTimeout := common.CmdEnvDuration("Timeout after how long the daemon will force a connection termination. By default, it's 8 minutes.", 8*time.Minute,
 		"", "NOCC_FORCE_INTERRUPT_TIMEOUT")
 
@@ -131,7 +135,7 @@ func main() {
 			failedStartDaemon(err)
 		}
 
-		daemon, err := client.MakeDaemon(remoteNoccHosts, *disableObjCache, *disableOwnIncludes, *localCxxQueueSize, *forceInterruptTimeout)
+		daemon, err := client.MakeDaemon(remoteNoccHosts, *disableObjCache, *disableOwnIncludes, *localCxxQueueSize, *forceInterruptTimeout, *remoteRetries, *disableLocalFallback)
 		if err != nil {
 			failedStartDaemon(err)
 		}

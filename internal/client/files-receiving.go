@@ -48,7 +48,7 @@ func (fr *FilesReceiving) RecreateReceiveStreamOrQuit(failedStreamCancelFunc con
 	time.Sleep(100 * time.Millisecond)
 
 	if err := fr.CreateReceiveStream(); err != nil {
-		fr.daemon.OnRemoteBecameUnavailable(fr.grpcClient.remoteHostPort, err)
+		fr.daemon.OnRemoteBecameUnavailable(fr.grpcClient, err)
 	}
 }
 
@@ -70,12 +70,16 @@ func (fr *FilesReceiving) monitorRemoteStreamForObjReceiving(stream pb.Compilati
 			default:
 				break
 			}
+			// this connection was replaced by a reconnect, and its successor has its own stream
+			if fr.grpcClient.IsCleared() {
+				return
+			}
 
 			// grpc stream creation doesn't wait for ack, that's why
 			// if a stream couldn't be created at all, we know this only on Recv() failure
 			if st, ok := status.FromError(err); ok {
 				if st.Code() == codes.Unauthenticated {
-					fr.daemon.OnRemoteBecameUnavailable(fr.grpcClient.remoteHostPort, err)
+					fr.daemon.OnRemoteBecameUnavailable(fr.grpcClient, err)
 					return
 				}
 			}

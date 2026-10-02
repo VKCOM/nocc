@@ -51,10 +51,36 @@ Here's the order: a build process starts → a daemon starts → a new client ap
 
 <p><br></p>
 
+## Checking that a server is the right compiler
+
+A server runs the compiler **name** a client sends, resolved on the server's own `PATH`. That's what lets a
+64-bit machine serve a 32-bit client: both sides say `arm-linux-gnueabihf-g++`, and each resolves it locally.
+
+It also means a name can mean something else on the other end — most typically a plain `g++`, which exists on
+every machine and targets whatever that machine is. So a client sends the target of its own compiler
+(`cxx -dumpmachine`) when starting a session, and a server refuses the session unless its `CxxName` resolves to
+a compiler with the same target, or isn't installed at all. The client then falls back — to another server, or
+to a local compilation.
+
+The check exists because of how the unchecked mismatch fails. Sometimes it's loud: compilation dies inside a
+system header, and the error points at glibc rather than at the misconfiguration. But for a file that includes
+no system headers it **succeeds**, and returns an object built for the wrong architecture — which nothing
+notices until the link, far from the cause.
+
+A refusal is remembered per server and per compiler name, so a server that can't serve a compiler costs one
+local compilation, not one per file.
+
+
+<p><br></p>
+
 ## Balancing files over servers
 
 When a daemon has an invocation to compile `1.cpp`, it **chooses a remote server based on a file name hash** (not a full path, just by basename).
 It does not try to balance servers by load, or least used, etc. — just a name hash.
+
+If the chosen server can't take the file — it's unavailable, or it isn't the compiler that was asked for — the
+daemon walks forward to the next server that can, and only compiles locally when none can. Just the files that
+hashed to the unusable server move, so every other server keeps its share and its caches.
 
 The intention is simple: when a build process runs from different machines, it could be in different folders in CI build agents — we want a file with its dependencies to point to one and the same server always.
 Even if file contents have changed since the previous run, probably its dependencies remain more or less the same and thus have already been uploaded to that exact server.

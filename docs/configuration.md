@@ -22,8 +22,29 @@ That's because `nocc` is by design invoked without self command-line arguments.
 | `NOCC_DISABLE_OWN_INCLUDES` bool        | Disable [own includes parser](./architecture.md#own-includes-parser): use a C++ preprocessor instead. It's much slower, but 100% works. By default, nocc traverses `#include` recursively using its own built-in parser.                                                                              | 
 | `NOCC_LOCAL_CXX_QUEUE_SIZE` int         | Amount of parallel processes when remotes aren't available and cxx is launched locally. By default, it's the number of CPUs on the current machine.                                                                                                                                                   |
 | `NOCC_FORCE_INTERRUPT_TIMEOUT` duration | Timeout after how long the daemon will force a connection termination. By default, it's 8 minutes.                                                                                                                                                                                                    |
+| `NOCC_REMOTE_RETRIES` int               | How many more times a compilation that failed on the network or a server is retried on the pool of servers, before falling back to local compilation (or failing, see below). Retries wait 1s, 2s, 4s, 8s, then 10s each, and reconnect to servers that went away first. By default, 0. |
+| `NOCC_DISABLE_LOCAL_FALLBACK` bool      | Fail a compilation that couldn't be done remotely instead of compiling it locally. Off by default. See [slow clients](#slow-clients-never-compile-locally).                                                                                                                                             |
 
 For real usage, you'll definitely have to specify `NOCC_GO_EXECUTABLE` and `NOCC_SERVERS`. It also makes sense of setting `NOCC_CLIENT_ID` and `NOCC_LOG_FILENAME`. Other options are unlikely to be used. 
+
+### Slow clients: never compile locally
+
+By default, a compilation that can't be done remotely — no server is reachable, or one dropped mid-file — is
+compiled locally instead. On a fast machine that's a graceful degradation. On a small single-core board it isn't:
+`make -j 4` turns into four local compilers at once, and the box all but hangs. For such clients, retry the
+servers and then fail, rather than compile locally:
+
+```bash
+NOCC_REMOTE_RETRIES=5 NOCC_DISABLE_LOCAL_FALLBACK=1 NOCC_GO_EXECUTABLE=/path/to/nocc-daemon make -j 4
+```
+
+Five retries span about 25 seconds, enough for a server to come back from a restart. A server marked unavailable
+is reconnected before each retry, so a restart costs a pause, not the rest of the build. The `nocc` wrapper
+retries reaching the daemon the same way. Things that are local by nature, like linking or a command line nocc
+can't compile remotely, are still run locally.
+
+
+<p><br></p>
 
 When you launch lots of jobs like `make -j 600`, then `nocc-daemon` has to maintain lots of local connections and files at the same time. If you face a "too many open files" error, consider increasing `ulimit -n`.
 

@@ -32,7 +32,7 @@ int ARGC;
 char **ARGV;
 
 const int BUF_PIPE_LEN = 32768;
-char BUF_PIPE[BUF_PIPE_LEN]; // a single buffer for in/out communication with nocc-daemon
+char BUF_PIPE[BUF_PIPE_LEN]; // a buffer for the request to nocc-daemon (a response is read into a growing heap buffer)
 
 struct GoDaemonResponse {
   int ExitCode{0};
@@ -97,6 +97,44 @@ void __attribute__((noreturn)) execute_cxx_locally(const char *errToPrint, int e
   exit(1);
 }
 
+// env NOCC_DISABLE_LOCAL_FALLBACK, parsed like Go's strconv.ParseBool (the daemon reads the same variable)
+bool is_local_fallback_disabled() {
+  const char *v = getenv("NOCC_DISABLE_LOCAL_FALLBACK");
+  if (v == nullptr) {
+    return false;
+  }
+  return !strcmp(v, "1") || !strcmp(v, "t") || !strcmp(v, "T") || !strcmp(v, "true") || !strcmp(v, "TRUE") || !strcmp(v, "True");
+}
+
+// env NOCC_REMOTE_RETRIES; here, it's how many more times to try reaching the daemon
+int get_remote_retries() {
+  const char *v = getenv("NOCC_REMOTE_RETRIES");
+  int retries = v ? atoi(v) : 0;
+  return retries > 0 ? retries : 0;
+}
+
+// the same schedule as the daemon's retries: 1s, 2s, 4s, 8s, then 10s
+unsigned int retry_delay_sec(int attempt) {
+  return attempt >= 4 ? 10 : 1u << attempt;
+}
+
+// fail_or_execute_cxx_locally() is execute_cxx_locally() for a failure, not for linking:
+// with NOCC_DISABLE_LOCAL_FALLBACK set, it fails the compilation instead.
+// That matters most here: compilations falling back in this wrapper bypass the daemon's local queue,
+// so on a slow machine, `make -j N` would launch N compilers at once.
+void __attribute__((noreturn)) fail_or_execute_cxx_locally(const char *errToPrint, int errnum = 0) {
+  if (!is_local_fallback_disabled()) {
+    execute_cxx_locally(errToPrint, errnum);
+  }
+  if (errnum) {
+    fprintf(stderr, "[nocc] %s: %s. Not compiling locally, since NOCC_DISABLE_LOCAL_FALLBACK is set\n", errToPrint, strerror(errnum));
+  } else {
+    fprintf(stderr, "[nocc] %s. Not compiling locally, since NOCC_DISABLE_LOCAL_FALLBACK is set\n", errToPrint);
+  }
+  append_message_to_log_file(errToPrint);
+  exit(1);
+}
+
 void __attribute__((noreturn)) execute_go_nocc_instead_of_cpp() {
   execv(NOCC_GO_EXECUTABLE, ARGV);
   printf("could not run %s, exit(1)\n", NOCC_GO_EXECUTABLE);
@@ -107,7 +145,8 @@ void __attribute__((noreturn)) execute_go_nocc_instead_of_cpp() {
 // we start the process and wait for something in stdout
 // it will be either an error message (if a daemon failed to start) or "1"
 // after a daemon starts, we'll connect to it in a regular way
-void start_daemon_in_background() {
+// returns nullptr on success, or what failed (errno is set when it applies)
+const char *start_daemon_in_background() {
   // when multiple `nocc` are launched simultaneously, let only the first process reaching this point start a daemon
   // others will sleep; they will wake up after a daemon has been started
   // this is done via lockfile
@@ -115,7 +154,7 @@ void start_daemon_in_background() {
   if (flock(lockfd, LOCK_EX | LOCK_NB)) {   // another process is being creating a daemon
     flock(lockfd, LOCK_EX);                 // unblock when that process finishes creating a daemon
     close(lockfd);
-    return;
+    return nullptr;
   }
   // this is the first and the only process creating a daemon
 
@@ -131,7 +170,8 @@ void start_daemon_in_background() {
 
   int pid = fork();
   if (pid < 0) {
-    execute_cxx_locally("could not start daemon", errno);
+    close(lockfd);
+    return "could not start daemon";
   }
   // child process: replace with `nocc-daemon start`
   if (pid == 0) {
@@ -145,42 +185,52 @@ void start_daemon_in_background() {
   close(pipd[1]);
 
   ssize_t n_read = read(pipd[0], BUF_PIPE, 1000);
+  close(pipd[0]);
   if (n_read <= 0) {
-    execute_cxx_locally("could not start daemon", errno);
+    close(lockfd);
+    return "could not start daemon";
   }
   if (BUF_PIPE[0] != '1' || BUF_PIPE[1] != '\0') {
-    execute_cxx_locally(BUF_PIPE);
+    BUF_PIPE[n_read < 1000 ? n_read : 999] = '\0';
+    close(lockfd);
+    errno = 0;
+    return BUF_PIPE;
   }
 
   unlink(LOCKFILE);
   flock(lockfd, LOCK_UN);
   close(lockfd);
+  return nullptr;
 }
 
 // connect to currently running `nocc-daemon` or start a new one, if it's the very first `nocc` invocation
-int connect_to_go_daemon_or_start_a_new_one() {
+// returns nullptr on success, or what failed (errno is set when it applies)
+const char *connect_to_go_daemon_or_start_a_new_one(int *sockfd) {
   sockaddr_un saddr{.sun_family=AF_UNIX};
   strcpy(saddr.sun_path, UNIX_SOCK);
-  int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
+  *sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
 
-  if (connect(sockfd, (sockaddr *)&saddr, sizeof(saddr)) == 0) {
-    return sockfd;
+  if (connect(*sockfd, (sockaddr *)&saddr, sizeof(saddr)) == 0) {
+    return nullptr;
   }
 
-  start_daemon_in_background();
-  if (connect(sockfd, (sockaddr *)&saddr, sizeof(saddr)) == 0) {
-    return sockfd;
+  if (const char *err = start_daemon_in_background()) {
+    return err;
   }
-  return -1;
+  if (connect(*sockfd, (sockaddr *)&saddr, sizeof(saddr)) == 0) {
+    return nullptr;
+  }
+  return "could not connect to daemon after starting";
 }
 
 // pipe current command-line invocation to a daemon via unix socket
 // request message format:
 // "{Cwd} {CmdLine...}\0"
 // see daemon-sock.go, onRequest()
-void write_request_to_go_daemon(int sockfd) {
+// returns nullptr on success, or what failed (errno is set when it applies)
+const char *write_request_to_go_daemon(int sockfd) {
   if (!getcwd(BUF_PIPE, BUF_PIPE_LEN - 2)) {
-    execute_cxx_locally("getcwd failed", errno);
+    fail_or_execute_cxx_locally("getcwd failed", errno);
   }
   size_t len = strlen(BUF_PIPE);
   BUF_PIPE[len++] = '\b';
@@ -189,7 +239,7 @@ void write_request_to_go_daemon(int sockfd) {
     size_t end = len + strlen(ARGV[i]);
     if (end > BUF_PIPE_LEN - 1) {
       fprintf(stderr, "too long %d: %s", ARGC, BUF_PIPE);
-      execute_cxx_locally("too long command-line invocation");
+      fail_or_execute_cxx_locally("too long command-line invocation");
     }
     strcpy(BUF_PIPE + len, ARGV[i]);
     len = end;
@@ -198,36 +248,62 @@ void write_request_to_go_daemon(int sockfd) {
   BUF_PIPE[--len] = '\0';
 
   if (len + 1 != send(sockfd, BUF_PIPE, len + 1, 0)) {
-    execute_cxx_locally("could not write to daemon socket", errno);
+    return "could not write to daemon socket";
   }
+  return nullptr;
 }
 
 // read a response from a daemon
-// reading will block until a daemon responses: only then it writes back to socket
+// reading will block until a daemon responses: only then it writes back to socket, and closes it
 // response message format:
 // "{ExitCode}\0{Stdout}\0{Stderr}\0"
 // if remote compilation fails, it falls back to local compilation within a daemon,
 // so a daemon always responds in such a format
 // see daemon-sock.go, onRequest()
-GoDaemonResponse read_response_from_go_daemon(int sockfd) {
-  ssize_t len = recv(sockfd, BUF_PIPE, sizeof(BUF_PIPE), 0);
-  if (len <= 0) {
-    execute_cxx_locally("could not read from daemon socket", errno);
+// returns nullptr on success, or what failed (errno is set when it applies)
+const char *read_response_from_go_daemon(int sockfd, GoDaemonResponse *output) {
+  // read until the daemon closes the socket: compiler output (warnings!) is unbounded
+  size_t cap = BUF_PIPE_LEN, len = 0;
+  char *buf = static_cast<char *>(malloc(cap));
+  for (;;) {
+    if (len + 1 >= cap) {
+      cap *= 2;
+      buf = static_cast<char *>(realloc(buf, cap));
+    }
+    ssize_t n = recv(sockfd, buf + len, cap - len - 1, 0);
+    if (n < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      free(buf);
+      return "could not read from daemon socket";
+    }
+    if (n == 0) {
+      break;
+    }
+    len += n;
   }
-  if (len == sizeof(BUF_PIPE)) {
-    // this could be handled properly by dynamic buffers
-    execute_cxx_locally("todo too big output from go");
+  if (len == 0) {
+    free(buf);
+    errno = 0;
+    return "could not read from daemon socket";
   }
+  buf[len] = '\0';
 
-  GoDaemonResponse output;
   char *end;
-  output.ExitCode = static_cast<int>(strtol(BUF_PIPE, &end, 10));
-  if (end == BUF_PIPE || *end != '\0') {
-    execute_cxx_locally("could not parse daemon response");
+  output->ExitCode = static_cast<int>(strtol(buf, &end, 10));
+  // three \0-terminated parts, so that Stdout and Stderr below stay inside what was received
+  if (end == buf || *end != '\0' || memchr(end + 1, '\0', len - (end + 1 - buf)) == nullptr) {
+    free(buf);
+    errno = 0;
+    return "could not parse daemon response";
   }
-  output.Stdout = end + 1;
-  output.Stderr = output.Stdout + strlen(output.Stdout) + 1;
-  return output;
+  output->Stdout = end + 1;
+  output->Stderr = output->Stdout + strlen(output->Stdout) + 1;
+  if (output->Stderr > buf + len) {
+    output->Stderr = buf + len;
+  }
+  return nullptr;
 }
 
 // heuristics, if current invocation is called for linking: `nocc g++ 1.o 2.o -o bin/o`
@@ -273,8 +349,8 @@ int main(int argc, char *argv[]) {
   }
 
   if (ARGC == 2 && !strcmp(ARGV[1], "start")) {
-    int sockfd = connect_to_go_daemon_or_start_a_new_one();
-    exit(sockfd == -1 ? 1 : 0);
+    int sockfd;
+    exit(connect_to_go_daemon_or_start_a_new_one(&sockfd) ? 1 : 0);
   }
   if (ARGC < 3 || ARGV[1] && ARGV[1][0] == '-') {
     execute_go_nocc_instead_of_cpp();
@@ -284,16 +360,39 @@ int main(int argc, char *argv[]) {
     execute_cxx_locally(nullptr);
   }
 
-  int sockfd = connect_to_go_daemon_or_start_a_new_one();
-  if (sockfd == -1) {
-    execute_cxx_locally("could not connect to daemon after starting");
+  // a daemon that died, or quit idle just as we connected, is started again on the next attempt
+  int retries = get_remote_retries();
+  for (int attempt = 0; ; ++attempt) {
+    int sockfd = -1;
+    GoDaemonResponse response;
+    const char *err = connect_to_go_daemon_or_start_a_new_one(&sockfd);
+    if (!err) {
+      err = write_request_to_go_daemon(sockfd);
+    }
+    if (!err) {
+      err = read_response_from_go_daemon(sockfd, &response);
+    }
+    int errnum = errno;
+    if (sockfd != -1) {
+      close(sockfd);
+    }
+
+    if (!err) {
+      fwrite(response.Stdout, strlen(response.Stdout), 1, stdout);
+      fwrite(response.Stderr, strlen(response.Stderr), 1, stderr);
+      return response.ExitCode;
+    }
+    if (attempt >= retries) {
+      fail_or_execute_cxx_locally(err, errnum);
+    }
+
+    unsigned int delay = retry_delay_sec(attempt);
+    if (errnum) {
+      fprintf(stderr, "[nocc] %s: %s. Retry %d of %d in %us...\n", err, strerror(errnum), attempt + 1, retries, delay);
+    } else {
+      fprintf(stderr, "[nocc] %s. Retry %d of %d in %us...\n", err, attempt + 1, retries, delay);
+    }
+    append_message_to_log_file(err);
+    sleep(delay);
   }
-  write_request_to_go_daemon(sockfd);
-
-  GoDaemonResponse response = read_response_from_go_daemon(sockfd);
-
-  fwrite(response.Stdout, strlen(response.Stdout), 1, stdout);
-  fwrite(response.Stderr, strlen(response.Stderr), 1, stderr);
-  return response.ExitCode;
 }
-
