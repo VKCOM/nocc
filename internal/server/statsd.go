@@ -15,16 +15,16 @@ import (
 type Statsd struct {
 	// cumulative statistics, atomics, incremented directly
 	// in grafana, to view deltas instead of rising metrics, one should use nonNegativeDerivative
-	bytesSent              int64
-	filesSent              int64
-	bytesReceived          int64
-	filesReceived          int64
-	clientsUnauthenticated int64
-	sessionsCount          int64
-	sessionsFailedOpen     int64
-	sessionsFromObjCache   int64
-	pchCompilations        int64
-	pchCompilationsFailed  int64
+	bytesSent              atomic.Int64
+	filesSent              atomic.Int64
+	bytesReceived          atomic.Int64
+	filesReceived          atomic.Int64
+	clientsUnauthenticated atomic.Int64
+	sessionsCount          atomic.Int64
+	sessionsFailedOpen     atomic.Int64
+	sessionsFromObjCache   atomic.Int64
+	pchCompilations        atomic.Int64
+	pchCompilationsFailed  atomic.Int64
 
 	statsdConnection net.Conn
 	statsdBuffer     bytes.Buffer
@@ -56,14 +56,14 @@ func (cs *Statsd) fillBufferWithStats(noccServer *NoccServer) {
 	cs.writeStat("server.goroutines", int64(runtime.NumGoroutine()))
 
 	cs.writeStat("sessions.active", noccServer.ActiveClients.ActiveSessionsCount())
-	cs.writeStat("sessions.total", atomic.LoadInt64(&cs.sessionsCount))
-	cs.writeStat("sessions.failed_open", atomic.LoadInt64(&cs.sessionsFailedOpen))
-	cs.writeStat("sessions.from_obj_cache", atomic.LoadInt64(&cs.sessionsFromObjCache))
+	cs.writeStat("sessions.total", cs.sessionsCount.Load())
+	cs.writeStat("sessions.failed_open", cs.sessionsFailedOpen.Load())
+	cs.writeStat("sessions.from_obj_cache", cs.sessionsFromObjCache.Load())
 
 	cs.writeStat("clients.active", noccServer.ActiveClients.ActiveCount())
 	cs.writeStat("clients.completed", noccServer.ActiveClients.CompletedCount())
 	cs.writeStat("clients.files_count", noccServer.ActiveClients.TotalFilesCountInDirs())
-	cs.writeStat("clients.unauthenticated", atomic.LoadInt64(&cs.clientsUnauthenticated))
+	cs.writeStat("clients.unauthenticated", cs.clientsUnauthenticated.Load())
 
 	cs.writeStat("cxx.calls", noccServer.CxxLauncher.GetTotalCxxCallsCount())
 	cs.writeStat("cxx.parallel", noccServer.CxxLauncher.GetNowCompilingSessionsCount())
@@ -73,14 +73,14 @@ func (cs *Statsd) fillBufferWithStats(noccServer *NoccServer) {
 	cs.writeStat("cxx.more30sec", noccServer.CxxLauncher.GetMore30secCount())
 	cs.writeStat("cxx.nonzero", noccServer.CxxLauncher.GetNonZeroExitCodeCount())
 
-	cs.writeStat("pch.calls", atomic.LoadInt64(&cs.pchCompilations))
-	cs.writeStat("pch.failed", atomic.LoadInt64(&cs.pchCompilationsFailed))
+	cs.writeStat("pch.calls", cs.pchCompilations.Load())
+	cs.writeStat("pch.failed", cs.pchCompilationsFailed.Load())
 
-	cs.writeStat("send.bytes", atomic.LoadInt64(&cs.bytesSent))
-	cs.writeStat("send.files", atomic.LoadInt64(&cs.filesSent))
+	cs.writeStat("send.bytes", cs.bytesSent.Load())
+	cs.writeStat("send.files", cs.filesSent.Load())
 
-	cs.writeStat("receive.bytes", atomic.LoadInt64(&cs.bytesReceived))
-	cs.writeStat("receive.files", atomic.LoadInt64(&cs.filesReceived))
+	cs.writeStat("receive.bytes", cs.bytesReceived.Load())
+	cs.writeStat("receive.files", cs.filesReceived.Load())
 
 	cs.writeStat("src_cache.count", noccServer.SrcFileCache.GetFilesCount())
 	cs.writeStat("src_cache.purged", noccServer.SrcFileCache.GetPurgedFilesCount())

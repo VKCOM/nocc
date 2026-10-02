@@ -18,7 +18,7 @@ type ClientsStorage struct {
 
 	clientsDir string // /tmp/nocc/cpp/clients
 
-	completedCount       int64
+	completedCount       atomic.Int64
 	lastPurgeTime        time.Time
 	checkInactiveTimeout time.Duration
 
@@ -82,7 +82,7 @@ func (allClients *ClientsStorage) DeleteClient(client *Client) {
 	allClients.mu.Lock()
 	delete(allClients.table, client.clientID)
 	allClients.mu.Unlock()
-	atomic.AddInt64(&allClients.completedCount, 1)
+	allClients.completedCount.Add(1)
 
 	close(client.chanDisconnected)
 	// don't close chanReadySessions intentionally, it's not a leak
@@ -133,7 +133,7 @@ func (allClients *ClientsStorage) ActiveCount() int64 {
 }
 
 func (allClients *ClientsStorage) CompletedCount() int64 {
-	return atomic.LoadInt64(&allClients.completedCount)
+	return allClients.completedCount.Load()
 }
 
 func (allClients *ClientsStorage) ActiveSessionsCount() int64 {

@@ -30,11 +30,11 @@ type FileCache struct {
 	lruTail, lruHead *lruNode
 	mu               sync.RWMutex
 
-	lastIndex   int64 // nb! atomic
-	purgedCount int64 // nb! atomic
+	lastIndex   atomic.Int64 // nb! atomic
+	purgedCount atomic.Int64 // nb! atomic
 	cacheDir    string
 
-	totalSizeOnDisk int64 // nb! atomic
+	totalSizeOnDisk atomic.Int64 // nb! atomic
 	hardLimit       int64
 	softLimit       int64
 }
@@ -100,7 +100,7 @@ func (cache *FileCache) CreateHardLinkFromCache(serverFileName string, key commo
 }
 
 func (cache *FileCache) SaveFileToCache(srcPath string, fileNameInCacheDir string, key common.SHA256, fileSize int64) error {
-	uniqueID := atomic.AddInt64(&cache.lastIndex, 1)
+	uniqueID := cache.lastIndex.Add(1)
 	pathInCache := fmt.Sprintf("%s/%X/%s.%X", cache.cacheDir, uniqueID%shardsDirCount, fileNameInCacheDir, uniqueID)
 
 	if err := os.Link(srcPath, pathInCache); err != nil {
@@ -112,7 +112,7 @@ func (cache *FileCache) SaveFileToCache(srcPath string, fileNameInCacheDir strin
 	cache.mu.Lock()
 	_, exists := cache.table[key]
 	if !exists {
-		atomic.AddInt64(&cache.totalSizeOnDisk, fileSize)
+		cache.totalSizeOnDisk.Add(fileSize)
 		cache.table[key] = value
 		newHead.next = cache.lruHead
 		if cache.lruHead != nil {
@@ -145,17 +145,17 @@ func (cache *FileCache) GetFilesCount() int64 {
 }
 
 func (cache *FileCache) GetBytesOnDisk() int64 {
-	return atomic.LoadInt64(&cache.totalSizeOnDisk)
+	return cache.totalSizeOnDisk.Load()
 }
 
 func (cache *FileCache) GetPurgedFilesCount() int64 {
-	return atomic.LoadInt64(&cache.purgedCount)
+	return cache.purgedCount.Load()
 }
 
 func (cache *FileCache) DropAll() {
 	cache.mu.Lock()
-	atomic.AddInt64(&cache.purgedCount, int64(len(cache.table)))
-	atomic.StoreInt64(&cache.totalSizeOnDisk, 0)
+	cache.purgedCount.Add(int64(len(cache.table)))
+	cache.totalSizeOnDisk.Store(0)
 
 	cache.table = make(map[common.SHA256]cachedFile, 128*1024)
 	cache.lruHead = nil
@@ -167,7 +167,7 @@ func (cache *FileCache) DropAll() {
 }
 
 func (cache *FileCache) purgeLastElementsTillLimit(cacheLimit int64) {
-	for atomic.LoadInt64(&cache.totalSizeOnDisk) > cacheLimit {
+	for cache.totalSizeOnDisk.Load() > cacheLimit {
 		var removingFile cachedFile
 		cache.mu.Lock()
 		if tail := cache.lruTail; tail != nil && tail.prev != nil {
@@ -180,8 +180,8 @@ func (cache *FileCache) purgeLastElementsTillLimit(cacheLimit int64) {
 
 		if removingFile.lruNode != nil {
 			_ = os.Remove(removingFile.pathInCache)
-			atomic.AddInt64(&cache.totalSizeOnDisk, -removingFile.fileSize)
-			atomic.AddInt64(&cache.purgedCount, 1)
+			cache.totalSizeOnDisk.Add(-removingFile.fileSize)
+			cache.purgedCount.Add(1)
 		}
 	}
 }

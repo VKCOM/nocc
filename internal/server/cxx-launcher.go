@@ -14,14 +14,14 @@ import (
 type CxxLauncher struct {
 	serverCxxThrottle chan struct{}
 
-	nSessionsReadyButWaiting int64
-	nSessionsNowCompiling    int64
+	nSessionsReadyButWaiting atomic.Int64
+	nSessionsNowCompiling    atomic.Int64
 
-	totalCalls           int64
-	totalDurationMs      int64
-	more10secCount       int64
-	more30secCount       int64
-	nonZeroExitCodeCount int64
+	totalCalls           atomic.Int64
+	totalDurationMs      atomic.Int64
+	more10secCount       atomic.Int64
+	more30secCount       atomic.Int64
+	nonZeroExitCodeCount atomic.Int64
 }
 
 func MakeCxxLauncher(maxParallelCxxProcesses int64) (*CxxLauncher, error) {
@@ -39,25 +39,25 @@ func MakeCxxLauncher(maxParallelCxxProcesses int64) (*CxxLauncher, error) {
 // Currently, amount of max parallel C++ processes is an option provided at start up
 // (it other words, it's not dynamic, nocc-server does not try to analyze CPU/memory).
 func (cxxLauncher *CxxLauncher) LaunchCxxWhenPossible(noccServer *NoccServer, session *Session) {
-	atomic.AddInt64(&cxxLauncher.nSessionsReadyButWaiting, 1)
+	cxxLauncher.nSessionsReadyButWaiting.Add(1)
 	cxxLauncher.serverCxxThrottle <- struct{}{} // blocking
 
-	atomic.AddInt64(&cxxLauncher.nSessionsReadyButWaiting, -1)
-	curParallelCount := atomic.AddInt64(&cxxLauncher.nSessionsNowCompiling, 1)
+	cxxLauncher.nSessionsReadyButWaiting.Add(-1)
+	curParallelCount := cxxLauncher.nSessionsNowCompiling.Add(1)
 
 	logServer.Info(1, "launch cxx #", curParallelCount, "sessionID", session.sessionID, "clientID", session.client.clientID, session.cppInFile)
 	cxxLauncher.launchServerCxxForCpp(session, noccServer) // blocking until cxx ends
 
-	atomic.AddInt64(&cxxLauncher.nSessionsNowCompiling, -1)
-	atomic.AddInt64(&cxxLauncher.totalCalls, 1)
-	atomic.AddInt64(&cxxLauncher.totalDurationMs, int64(session.cxxDuration))
+	cxxLauncher.nSessionsNowCompiling.Add(-1)
+	cxxLauncher.totalCalls.Add(1)
+	cxxLauncher.totalDurationMs.Add(int64(session.cxxDuration))
 
 	if session.cxxExitCode != 0 {
-		atomic.AddInt64(&cxxLauncher.nonZeroExitCodeCount, 1)
+		cxxLauncher.nonZeroExitCodeCount.Add(1)
 	} else if session.cxxDuration > 30000 {
-		atomic.AddInt64(&cxxLauncher.more30secCount, 1)
+		cxxLauncher.more30secCount.Add(1)
 	} else if session.cxxDuration > 10000 {
-		atomic.AddInt64(&cxxLauncher.more10secCount, 1)
+		cxxLauncher.more10secCount.Add(1)
 	}
 
 	<-cxxLauncher.serverCxxThrottle
@@ -65,31 +65,31 @@ func (cxxLauncher *CxxLauncher) LaunchCxxWhenPossible(noccServer *NoccServer, se
 }
 
 func (cxxLauncher *CxxLauncher) GetNowCompilingSessionsCount() int64 {
-	return atomic.LoadInt64(&cxxLauncher.nSessionsNowCompiling)
+	return cxxLauncher.nSessionsNowCompiling.Load()
 }
 
 func (cxxLauncher *CxxLauncher) GetWaitingInQueueSessionsCount() int64 {
-	return atomic.LoadInt64(&cxxLauncher.nSessionsReadyButWaiting)
+	return cxxLauncher.nSessionsReadyButWaiting.Load()
 }
 
 func (cxxLauncher *CxxLauncher) GetTotalCxxCallsCount() int64 {
-	return atomic.LoadInt64(&cxxLauncher.totalCalls)
+	return cxxLauncher.totalCalls.Load()
 }
 
 func (cxxLauncher *CxxLauncher) GetTotalCxxDurationMilliseconds() int64 {
-	return atomic.LoadInt64(&cxxLauncher.totalDurationMs)
+	return cxxLauncher.totalDurationMs.Load()
 }
 
 func (cxxLauncher *CxxLauncher) GetMore10secCount() int64 {
-	return atomic.LoadInt64(&cxxLauncher.more10secCount)
+	return cxxLauncher.more10secCount.Load()
 }
 
 func (cxxLauncher *CxxLauncher) GetMore30secCount() int64 {
-	return atomic.LoadInt64(&cxxLauncher.more30secCount)
+	return cxxLauncher.more30secCount.Load()
 }
 
 func (cxxLauncher *CxxLauncher) GetNonZeroExitCodeCount() int64 {
-	return atomic.LoadInt64(&cxxLauncher.nonZeroExitCodeCount)
+	return cxxLauncher.nonZeroExitCodeCount.Load()
 }
 
 func (cxxLauncher *CxxLauncher) launchServerCxxForCpp(session *Session, noccServer *NoccServer) {
@@ -137,13 +137,13 @@ func (cxxLauncher *CxxLauncher) launchServerCxxForPch(cxxName string, cxxCmdLine
 	cxxCommand.Stdout = &cxxStdout
 
 	logServer.Info(1, "launch cxx for pch compilation", "rootDir", rootDir)
-	atomic.AddInt64(&noccServer.Stats.pchCompilations, 1)
+	noccServer.Stats.pchCompilations.Add(1)
 	_ = cxxCommand.Run()
 
 	cxxExitCode := cxxCommand.ProcessState.ExitCode()
 
 	if cxxExitCode != 0 {
-		atomic.AddInt64(&noccServer.Stats.pchCompilationsFailed, 1)
+		noccServer.Stats.pchCompilationsFailed.Add(1)
 		logServer.Error("the C++ compiler exited with code pch", cxxExitCode, "\ncmdLine:", cxxName, cxxCmdLine, "\ncxxStdout:", strings.TrimSpace(cxxStdout.String()), "\ncxxStderr:", strings.TrimSpace(cxxStderr.String()))
 		return fmt.Errorf("could not compile pch: the C++ compiler exited with code %d\n%s", cxxExitCode, cxxStdout.String()+cxxStderr.String())
 	}
