@@ -312,6 +312,13 @@ func (s *NoccServer) RecvCompiledObjStream(in *pb.OpenReceiveStreamRequest, stre
 		case session := <-client.chanReadySessions:
 			client.lastSeen = time.Now()
 
+			// a compiler killed under this server says nothing about the source: fail the session
+			// instead of passing it off as a compile error, so the client compiles it some other way
+			if common.CompilerWasKilled(session.cxxExitCode, session.cxxStderr) {
+				client.CloseSession(session)
+				return onError(session.sessionID, "the C++ compiler was killed on the server for sessionID %d clientID %s: %s", session.sessionID, client.clientID, strings.TrimSpace(string(session.cxxStderr)))
+			}
+
 			if session.cxxExitCode != 0 {
 				err := stream.Send(&pb.RecvCompiledObjChunkReply{
 					SessionID:   session.sessionID,

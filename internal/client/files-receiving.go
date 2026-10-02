@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/VKCOM/nocc/internal/common"
@@ -109,6 +110,13 @@ func (fr *FilesReceiving) monitorRemoteStreamForObjReceiving(stream pb.Compilati
 					return
 				}
 			}
+			continue
+		}
+
+		// the same check as on the server, for a server that predates it: a compiler killed there
+		// is a remote failure, not a compile error
+		if common.CompilerWasKilled(firstChunk.CxxExitCode, firstChunk.CxxStderr) {
+			invocation.DoneRecvObj(fmt.Errorf("the C++ compiler was killed on the remote (exit code %d): %s", firstChunk.CxxExitCode, strings.TrimSpace(string(firstChunk.CxxStderr))))
 			continue
 		}
 
